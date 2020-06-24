@@ -12,7 +12,7 @@ from joeynmt.attention import BahdanauAttention, LuongAttention
 from joeynmt.encoders import Encoder
 from joeynmt.helpers import freeze_params, ConfigurationError, subsequent_mask
 from joeynmt.transformer_layers import PositionalEncoding, \
-    TransformerDecoderLayer, ExtendedTransformerDecoderLayer
+    TransformerDecoderLayer
 from joeynmt.convSeq2SeqLayers import ConvSeq2SeqDecoderLayer, AbsolutePositionalEncoding
 
 
