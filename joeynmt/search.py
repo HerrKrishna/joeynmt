@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 
-from joeynmt.decoders import Decoder, TransformerDecoder, ExtendedTransformerDecoder, ConvSeq2SeqDecoder
+from joeynmt.decoders import Decoder, TransformerDecoder, ConvSeq2SeqDecoder
 from joeynmt.embeddings import Embeddings
 from joeynmt.helpers import tile
 
@@ -33,8 +33,7 @@ def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
     :return:
     """
 
-    if isinstance(decoder, TransformerDecoder) or isinstance(decoder, ExtendedTransformerDecoder) or \
-            isinstance(decoder, ConvSeq2SeqDecoder):
+    if isinstance(decoder, TransformerDecoder) or isinstance(decoder, ConvSeq2SeqDecoder):
         # Transformer greedy decoding
         greedy_fun = transformer_greedy
     else:
