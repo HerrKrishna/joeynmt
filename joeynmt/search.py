@@ -15,7 +15,7 @@ __all__ = ["greedy", "transformer_greedy", "beam_search"]
 def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
            max_output_length: int, decoder: Decoder,
            encoder_output: Tensor, encoder_hidden: Tensor,
-           src_embed: Tensor)\
+           src_embed: Tensor = None)\
         -> (np.array, np.array):
     """
     Greedy decoding. Select the token word highest probability at each time
@@ -48,7 +48,7 @@ def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
 def recurrent_greedy(
         src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
         max_output_length: int, decoder: Decoder,
-        encoder_output: Tensor, encoder_hidden: Tensor, src_embed: Tensor) -> (np.array, np.array):
+        encoder_output: Tensor, encoder_hidden: Tensor, src_embed: Tensor = None) -> (np.array, np.array):
     """
     Greedy decoding: in each step, choose the word that gets highest score.
     Version for recurrent decoder.
@@ -113,7 +113,7 @@ def transformer_greedy(
         bos_index: int, eos_index: int,
         max_output_length: int, decoder: Decoder,
         encoder_output: Tensor, encoder_hidden: Tensor,
-        src_embed: Tensor) -> (np.array, None):
+        src_embed: Tensor = None) -> (np.array, None):
     """
     Special greedy function for transformer, since it works differently.
     The transformer remembers all previous states and attends to them.
@@ -181,7 +181,7 @@ def beam_search(
         bos_index: int, eos_index: int, pad_index: int,
         encoder_output: Tensor, encoder_hidden: Tensor,
         src_mask: Tensor, max_output_length: int, alpha: float,
-        embed: Embeddings, src_embed: Tensor, n_best: int = 1) -> (np.array, np.array):
+        embed: Embeddings, src_embed: Tensor = None, n_best: int = 1) -> (np.array, np.array):
     """
     Beam search with size k.
     Inspired by OpenNMT-py, adapted for Transformer.
@@ -209,12 +209,16 @@ def beam_search(
 
     # init
     transformer = isinstance(decoder, TransformerDecoder)
+    convSeq2Seq = isinstance(decoder, ConvSeq2SeqDecoder)
+
+    if convSeq2Seq:
+        assert src_embed is not None, "need to pass srcEmbeddings to decoder for ConvSeq2Seq"
     batch_size = src_mask.size(0)
     att_vectors = None  # not used for Transformer
 
     # Recurrent models only: initialize RNN hidden state
     # pylint: disable=protected-access
-    if not transformer:
+    if not transformer and not convSeq2Seq:
         hidden = decoder._init_hidden(encoder_hidden)
     else:
         hidden = None
@@ -225,10 +229,13 @@ def beam_search(
 
     encoder_output = tile(encoder_output.contiguous(), size,
                           dim=0)  # batch*k x src_len x enc_hidden_size
+    if convSeq2Seq:
+        src_embed = tile(src_embed.contiguous(), size, dim=0)
+
     src_mask = tile(src_mask, size, dim=0)  # batch*k x 1 x src_len
 
     # Transformer only: create target mask
-    if transformer:
+    if transformer or convSeq2Seq:
         trg_mask = src_mask.new_ones([1, 1, 1])  # transformer only
     else:
         trg_mask = None
@@ -273,7 +280,7 @@ def beam_search(
         # decoder to make the next prediction.
         # For Transformer, we feed the complete predicted sentence so far.
         # For Recurrent models, only feed the previous target word prediction
-        if transformer:  # Transformer
+        if transformer or convSeq2Seq:  # Transformer
             decoder_input = alive_seq  # complete prediction so far
         else:  # Recurrent
             decoder_input = alive_seq[:, -1].view(-1, 1)  # only the last word
@@ -283,6 +290,7 @@ def beam_search(
         # logits: logits for final softmax
         # pylint: disable=unused-variable
         trg_embed = embed(decoder_input)
+
         logits, hidden, att_scores, att_vectors = decoder(
             encoder_output=encoder_output,
             encoder_hidden=encoder_hidden,
@@ -297,7 +305,7 @@ def beam_search(
 
         # For the Transformer we made predictions for all time steps up to
         # this point, so we only want to know about the last time step.
-        if transformer:
+        if transformer or convSeq2Seq:
             logits = logits[:, -1]  # keep only the last time step
             hidden = None           # we don't need to keep it for transformer
 
@@ -390,9 +398,11 @@ def beam_search(
         # reorder indices, outputs and masks
         select_indices = batch_index.view(-1)
         encoder_output = encoder_output.index_select(0, select_indices)
+        if convSeq2Seq:
+            src_embed = src_embed.index_select(0, select_indices)
         src_mask = src_mask.index_select(0, select_indices)
 
-        if hidden is not None and not transformer:
+        if hidden is not None and not transformer and not convSeq2Seq:
             if isinstance(hidden, tuple):
                 # for LSTMs, states are tuples of tensors
                 h, c = hidden
