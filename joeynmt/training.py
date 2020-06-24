@@ -275,6 +275,7 @@ class TrainManager:
         :param train_data: training data
         :param valid_data: validation data
         """
+        print('specified_batch_size =', self.batch_size)
         train_iter = make_data_iter(train_data,
                                     batch_size=self.batch_size,
                                     batch_type=self.batch_type,
@@ -284,7 +285,7 @@ class TrainManager:
         # to fit the number of leftover training examples
         leftover_batch_size = len(
             train_data) % (self.batch_multiplier * self.batch_size)
-
+        print('leftover batch_size: ', leftover_batch_size)
         for epoch_no in range(self.epochs):
             self.logger.info("EPOCH %d", epoch_no + 1)
 
@@ -305,8 +306,8 @@ class TrainManager:
                 # reactivate training
                 self.model.train()
                 # create a Batch object from torchtext batch
-                batch = Batch(batch, self.pad_index, use_cuda=self.use_cuda)
 
+                batch = Batch(batch, self.pad_index, use_cuda=self.use_cuda)
                 # only update every batch_multiplier batches
                 # see https://medium.com/@davidlmorton/
                 # increasing-mini-batch-size-without-increasing-

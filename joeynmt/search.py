@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import numpy as np
 
-from joeynmt.decoders import Decoder, TransformerDecoder
+from joeynmt.decoders import Decoder, TransformerDecoder, ExtendedTransformerDecoder, ConvSeq2SeqDecoder
 from joeynmt.embeddings import Embeddings
 from joeynmt.helpers import tile
 
@@ -14,7 +14,8 @@ __all__ = ["greedy", "transformer_greedy", "beam_search"]
 
 def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
            max_output_length: int, decoder: Decoder,
-           encoder_output: Tensor, encoder_hidden: Tensor)\
+           encoder_output: Tensor, encoder_hidden: Tensor,
+           src_embed: Tensor)\
         -> (np.array, np.array):
     """
     Greedy decoding. Select the token word highest probability at each time
@@ -32,7 +33,8 @@ def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
     :return:
     """
 
-    if isinstance(decoder, TransformerDecoder):
+    if isinstance(decoder, TransformerDecoder) or isinstance(decoder, ExtendedTransformerDecoder) or \
+            isinstance(decoder, ConvSeq2SeqDecoder):
         # Transformer greedy decoding
         greedy_fun = transformer_greedy
     else:
@@ -41,13 +43,13 @@ def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
 
     return greedy_fun(
         src_mask, embed, bos_index, eos_index, max_output_length,
-        decoder, encoder_output, encoder_hidden)
+        decoder, encoder_output, encoder_hidden, src_embed)
 
 
 def recurrent_greedy(
         src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
         max_output_length: int, decoder: Decoder,
-        encoder_output: Tensor, encoder_hidden: Tensor) -> (np.array, np.array):
+        encoder_output: Tensor, encoder_hidden: Tensor, src_embed: Tensor) -> (np.array, np.array):
     """
     Greedy decoding: in each step, choose the word that gets highest score.
     Version for recurrent decoder.
@@ -83,7 +85,8 @@ def recurrent_greedy(
             trg_embed=embed(prev_y),
             hidden=hidden,
             prev_att_vector=prev_att_vector,
-            unroll_steps=1)
+            unroll_steps=1,
+            src_embed=src_embed)
         # logits: batch x time=1 x vocab (logits)
 
         # greedy decoding: choose arg max over vocabulary in each step
@@ -110,7 +113,8 @@ def transformer_greedy(
         src_mask: Tensor, embed: Embeddings,
         bos_index: int, eos_index: int,
         max_output_length: int, decoder: Decoder,
-        encoder_output: Tensor, encoder_hidden: Tensor) -> (np.array, None):
+        encoder_output: Tensor, encoder_hidden: Tensor,
+        src_embed: Tensor) -> (np.array, None):
     """
     Special greedy function for transformer, since it works differently.
     The transformer remembers all previous states and attends to them.
@@ -147,11 +151,12 @@ def transformer_greedy(
             logits, out, _, _ = decoder(
                 trg_embed=trg_embed,
                 encoder_output=encoder_output,
-                encoder_hidden=None,
+                encoder_hidden=encoder_hidden,
                 src_mask=src_mask,
                 unroll_steps=None,
                 hidden=None,
-                trg_mask=trg_mask
+                trg_mask=trg_mask,
+                src_embed=src_embed
             )
 
             logits = logits[:, -1]
@@ -177,7 +182,7 @@ def beam_search(
         bos_index: int, eos_index: int, pad_index: int,
         encoder_output: Tensor, encoder_hidden: Tensor,
         src_mask: Tensor, max_output_length: int, alpha: float,
-        embed: Embeddings, n_best: int = 1) -> (np.array, np.array):
+        embed: Embeddings, src_embed: Tensor, n_best: int = 1) -> (np.array, np.array):
     """
     Beam search with size k.
     Inspired by OpenNMT-py, adapted for Transformer.
@@ -287,7 +292,8 @@ def beam_search(
             hidden=hidden,
             prev_att_vector=att_vectors,
             unroll_steps=1,
-            trg_mask=trg_mask  # subsequent mask for Transformer only
+            trg_mask=trg_mask,
+            src_embed=src_embed# subsequent mask for Transformer only
         )
 
         # For the Transformer we made predictions for all time steps up to

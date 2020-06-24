@@ -11,8 +11,8 @@ import torch.nn.functional as F
 
 from joeynmt.initialization import initialize_model
 from joeynmt.embeddings import Embeddings
-from joeynmt.encoders import Encoder, RecurrentEncoder, TransformerEncoder
-from joeynmt.decoders import Decoder, RecurrentDecoder, TransformerDecoder
+from joeynmt.encoders import Encoder, RecurrentEncoder, TransformerEncoder, ConvSeq2SeqEncoder
+from joeynmt.decoders import Decoder, RecurrentDecoder, TransformerDecoder, ConvSeq2SeqDecoder
 from joeynmt.constants import PAD_TOKEN, EOS_TOKEN, BOS_TOKEN
 from joeynmt.search import beam_search, greedy
 from joeynmt.vocabulary import Vocabulary
@@ -77,7 +77,8 @@ class Model(nn.Module):
                            encoder_hidden=encoder_hidden,
                            src_mask=src_mask, trg_input=trg_input,
                            unroll_steps=unroll_steps,
-                           trg_mask=trg_mask)
+                           trg_mask=trg_mask,
+                           src_embed=self.src_embed(src))
 
     def encode(self, src: Tensor, src_length: Tensor, src_mask: Tensor) \
         -> (Tensor, Tensor):
@@ -94,7 +95,8 @@ class Model(nn.Module):
     def decode(self, encoder_output: Tensor, encoder_hidden: Tensor,
                src_mask: Tensor, trg_input: Tensor,
                unroll_steps: int, decoder_hidden: Tensor = None,
-               trg_mask: Tensor = None) \
+               trg_mask: Tensor = None,
+               src_embed: Tensor = None) \
         -> (Tensor, Tensor, Tensor, Tensor):
         """
         Decode, given an encoded source sentence.
@@ -106,9 +108,11 @@ class Model(nn.Module):
         :param unroll_steps: number of steps to unrol the decoder for
         :param decoder_hidden: decoder hidden state (optional)
         :param trg_mask: mask for target steps
+        :param src_embed:
         :return: decoder outputs (outputs, hidden, att_probs, att_vectors)
         """
         return self.decoder(trg_embed=self.trg_embed(trg_input),
+                            src_embed=src_embed,
                             encoder_output=encoder_output,
                             encoder_hidden=encoder_hidden,
                             src_mask=src_mask,
@@ -167,7 +171,8 @@ class Model(nn.Module):
                     encoder_output=encoder_output, eos_index=self.eos_index,
                     src_mask=batch.src_mask, embed=self.trg_embed,
                     bos_index=self.bos_index, decoder=self.decoder,
-                    max_output_length=max_output_length)
+                    max_output_length=max_output_length,
+                    src_embed=self.src_embed(batch.src))
             # batch, time, max_src_length
         else:  # beam size
             stacked_output, stacked_attention_scores = \
@@ -179,7 +184,9 @@ class Model(nn.Module):
                         alpha=beam_alpha, eos_index=self.eos_index,
                         pad_index=self.pad_index,
                         bos_index=self.bos_index,
-                        decoder=self.decoder)
+                        decoder=self.decoder,
+                        src_embed=self.src_embed(batch.src)
+                    )
 
         return stacked_output, stacked_attention_scores
 
@@ -240,6 +247,18 @@ def build_model(cfg: dict = None,
         encoder = TransformerEncoder(**cfg["encoder"],
                                      emb_size=src_embed.embedding_dim,
                                      emb_dropout=enc_emb_dropout)
+
+    elif cfg["encoder"].get("type", "recurrent") == "convSeq2Seq":
+        assert cfg['encoder']['kernel_size'] % 2 == 1, \
+            "for ConvSeq2Seq Kernel size must be an odd number"
+        assert cfg['encoder']['embeddings']['embedding_dim'] == \
+               cfg['encoder']['hidden_size'], \
+                "hidden size and embedding dim must be the same "\
+                "for convSeq2Seq"
+
+        encoder = ConvSeq2SeqEncoder(**cfg["encoder"],
+                                     emb_size=src_embed.embedding_dim,
+                                     emb_dropout=enc_emb_dropout)
     else:
         encoder = RecurrentEncoder(**cfg["encoder"],
                                    emb_size=src_embed.embedding_dim,
@@ -252,6 +271,20 @@ def build_model(cfg: dict = None,
         decoder = TransformerDecoder(
             **cfg["decoder"], encoder=encoder, vocab_size=len(trg_vocab),
             emb_size=trg_embed.embedding_dim, emb_dropout=dec_emb_dropout)
+
+    elif cfg["decoder"].get("type", "recurrent") == "convSeq2Seq":
+        assert cfg['decoder']['kernel_size'] % 2 == 1, \
+            "for ConvSeq2Seq Kernel size must be an odd number"
+        assert cfg['decoder']['embeddings']['embedding_dim'] == \
+               cfg['decoder']['hidden_size'] and \
+                cfg['encoder']['hidden_size'] == \
+                cfg['decoder']['hidden_size'], \
+                "hidden_sizes and embedding_sizes of encoder and decoder " \
+                "must all be the same"
+        decoder = ConvSeq2SeqDecoder(
+            **cfg["decoder"], encoder=encoder, vocab_size=len(trg_vocab),
+            emb_size=trg_embed.embedding_dim, emb_dropout=dec_emb_dropout)
+
     else:
         decoder = RecurrentDecoder(
             **cfg["decoder"], encoder=encoder, vocab_size=len(trg_vocab),

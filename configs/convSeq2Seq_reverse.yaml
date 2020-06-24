@@ -28,15 +28,15 @@ training:
     learning_rate_min: 0.00000001
     label_smoothing: 0.1
     weight_decay: 0.0
-    batch_size: 250
-    batch_type: "token"
+    batch_size: 10
+    batch_type: "sentence"
     epochs: 30
     validation_freq: 1000
     logging_freq: 100
     eval_metric: "bleu"
-    model_dir: "models/transformer_reverse"
+    model_dir: "models/extTransformer_reverse"
     overwrite: True
-    shuffle: True
+    shuffle: False
     use_cuda: False
     max_output_length: 30
     print_valid_sents: [0, 3, 6, 9]
@@ -49,27 +49,25 @@ model:
     bias_initializer: "zeros"       # initializer for bias terms (xavier, zeros, normal, uniform)
     embed_initializer: "xavier"     # initializer for embeddings (xavier, zeros, normal, uniform)
     embed_init_gain: 1.0            # gain for Xavier initializer for embeddings (default: 1.0)
-    tied_embeddings: True          # tie src and trg embeddings, only applicable if vocabularies are the same, default: False
-    tied_softmax: True
+    tied_embeddings: False          # tie src and trg embeddings, only applicable if vocabularies are the same, default: False
+    tied_softmax: False
     encoder:
-        type: "transformer"
+        type: "convSeq2Seq"
         num_layers: 2
         num_heads: 4
         embeddings:
             embedding_dim: 64
             scale: True
-        # typically ff_size = 4 x hidden_size
         hidden_size: 64
-        ff_size: 256
+        kernel_size: 5
         dropout: 0.1
     decoder:
-        type: "transformer"
+        type: "convSeq2Seq"
         num_layers: 2
         num_heads: 4
         embeddings:
             embedding_dim: 64
             scale: True
-        # typically ff_size = 4 x hidden_size
         hidden_size: 64
-        ff_size: 256
+        kernel_size: 5
         dropout: 0.1

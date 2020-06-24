@@ -12,7 +12,8 @@ from joeynmt.attention import BahdanauAttention, LuongAttention
 from joeynmt.encoders import Encoder
 from joeynmt.helpers import freeze_params, ConfigurationError, subsequent_mask
 from joeynmt.transformer_layers import PositionalEncoding, \
-    TransformerDecoderLayer
+    TransformerDecoderLayer, ExtendedTransformerDecoderLayer
+from joeynmt.convSeq2SeqLayers import ConvSeq2SeqDecoderLayer, AbsolutePositionalEncoding
 
 
 # pylint: disable=abstract-method
@@ -526,3 +527,94 @@ class TransformerDecoder(Decoder):
         return "%s(num_layers=%r, num_heads=%r)" % (
             self.__class__.__name__, len(self.layers),
             self.layers[0].trg_trg_att.num_heads)
+
+
+# pylint: disable=arguments-differ,too-many-arguments
+# pylint: disable=too-many-instance-attributes, unused-argument
+class ConvSeq2SeqDecoder(Decoder):
+    """
+    A Convolutional Sequence2Sequence decoder with N layers.
+    """
+    def __init__(self,
+                 num_layers: int = 4,
+                 hidden_size: int = 512,
+                 emb_size: int = 512,
+                 kernel_size: int = 5,
+                 dropout: float = 0.1,
+                 emb_dropout: float = 0.1,
+                 vocab_size: int = 1,
+                 freeze: bool = False,
+                 **kwargs):
+        """
+        Initialize a ConvSeq2Seq decoder.
+
+        :param num_layers: number of Transformer layers
+        :param hidden_size: hidden size
+        :param dropout: dropout probability (1-keep)
+        :param emb_dropout: dropout probability for embeddings
+        :param vocab_size: size of the output vocabulary
+        :param freeze: set to True keep all decoder parameters fixed
+        :param kwargs:
+        """
+        super(ConvSeq2SeqDecoder, self).__init__()
+
+        self._hidden_size = hidden_size
+        self._output_size = vocab_size
+
+        # create num_layers decoder layers and put them in a list
+        self.layers = nn.ModuleList([ConvSeq2SeqDecoderLayer(
+                                        hidden_size=hidden_size,
+                                        embedding_size=emb_size,
+                                        kernel_size=kernel_size,
+                                        dropout=dropout) for _ in range(num_layers)])
+
+        self.absPE = AbsolutePositionalEncoding(emb_size)
+        self.emb2hidden = nn.Linear(emb_size, hidden_size)
+        self.emb_dropout = nn.Dropout(p=emb_dropout)
+        self.output_layer = nn.Linear(hidden_size, vocab_size, bias=False)
+
+        if freeze:
+            freeze_params(self)
+
+    def forward(self,
+                trg_embed: Tensor = None,
+                src_embed: Tensor = None,
+                encoder_output: Tensor = None,
+                encoder_hidden: Tensor = None,
+                src_mask: Tensor = None,
+                unroll_steps: int = None,
+                hidden: Tensor = None,
+                trg_mask: Tensor = None,
+                **kwargs):
+        """
+        Transformer decoder forward pass.
+
+        :param trg_embed: embedded targets
+        :param src_embed: embedded inputs
+        :param encoder_output: source representations
+        :param encoder_hidden: unused
+        :param src_mask:
+        :param unroll_steps: unused
+        :param hidden: unused
+        :param trg_mask: to mask out target paddings
+                         Note that a subsequent mask is applied here.
+        :param kwargs:
+        :return:
+        """
+        x = self.absPE(trg_embed)  # add position encoding to word embeddings
+        x = self.emb_dropout(x)
+        x = self.emb2hidden(x)
+
+        x = x.permute(0, 2, 1)
+
+        for layer in self.layers:
+            x = layer(x, trg_embed, encoder_output, src_embed)
+
+        x = x.permute(0, 2, 1)
+        output = self.output_layer(x)
+
+        return output, x, None, None
+
+    def __repr__(self):
+        return "%s(num_layers=%r)" % (
+            self.__class__.__name__, len(self.layers))

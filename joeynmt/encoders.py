@@ -8,6 +8,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from joeynmt.helpers import freeze_params
 from joeynmt.transformer_layers import \
     TransformerEncoderLayer, PositionalEncoding
+from joeynmt.convSeq2SeqLayers import ConvSeq2SeqEncoderLayer, AbsolutePositionalEncoding
 
 
 #pylint: disable=abstract-method
@@ -224,3 +225,78 @@ class TransformerEncoder(Encoder):
         return "%s(num_layers=%r, num_heads=%r)" % (
             self.__class__.__name__, len(self.layers),
             self.layers[0].src_src_att.num_heads)
+
+
+class ConvSeq2SeqEncoder(Encoder):
+    """
+    Convolutional Sequence2Sequence Encoder
+    """
+
+    # pylint: disable=unused-argument
+    def __init__(self,
+                 hidden_size: int = 512,
+                 emb_size: int = 512,
+                 kernel_size: int = 5,
+                 num_layers: int = 15,
+                 dropout: float = 0.1,
+                 emb_dropout: float = 0.1,
+                 freeze: bool = False,
+                 **kwargs):
+        """
+        Initializes the ConvSeq2Seq Encoder.
+        :param hidden_size: hidden size and size of embeddings
+        :param ff_size: position-wise feed-forward layer size.
+          (Typically this is 2*hidden_size.)
+        :param num_layers: number of layers
+        :param dropout: dropout probability for Transformer layers
+        :param emb_dropout: Is applied to the input (word embeddings).
+        :param freeze: freeze the parameters of the encoder during training
+        :param kwargs:
+        """
+        super(ConvSeq2SeqEncoder, self).__init__()
+
+        # build all (num_layers) layers
+        self.layers = nn.ModuleList([
+            ConvSeq2SeqEncoderLayer(hidden_size=hidden_size, kernel_size=kernel_size,
+                                    dropout=dropout)
+            for _ in range(num_layers)])
+
+        self.absPE = AbsolutePositionalEncoding(emb_size)
+        self.emb2hidden = nn.Linear(emb_size, hidden_size)
+        self.emb_dropout = nn.Dropout(p=emb_dropout)
+
+        if freeze:
+            freeze_params(self)
+
+    # pylint: disable=arguments-differ
+    def forward(self,
+                embed_src: Tensor, src_length: Tensor, mask: Tensor) -> (Tensor, Tensor):
+        """
+        Add Absolute Positional Embeddings to input.
+        Apply the convSeq2Seq encoder layers.
+
+        :param embed_src: embedded src inputs,
+            shape (batch_size, src_len, embed_size)
+        :param src_length: length of src inputs
+            (counting tokens before padding), shape (batch_size)
+
+        :return:
+            - output: hidden states with
+                shape (batch_size, max_length, directions*hidden),
+            - hidden_concat: last hidden state with
+                shape (batch_size, directions*hidden)
+        """
+        x = self.absPE(embed_src)  # add position encoding to word embeddings
+        x = self.emb_dropout(x)
+        x = self.emb2hidden(x)
+
+        x = x.permute(0, 2, 1)
+        for layer in self.layers:
+            x = layer(x)
+
+        x = x.permute(0, 2, 1)
+        return x, None
+
+    def __repr__(self):
+        return "%s(num_layers=%r)" % (
+            self.__class__.__name__, len(self.layers))
