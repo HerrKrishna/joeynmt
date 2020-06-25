@@ -11,9 +11,11 @@ class AbsolutePositionalEncoding(nn.Module):
                  max_len: int = 5000):
 
         super(AbsolutePositionalEncoding, self).__init__()
-        self.positions = torch.arange(0, max_len)
+        positions = torch.arange(0, max_len)
+        self.positions = positions.cuda()
         self.embed = nn.Embedding(max_len, embedding_size)
-        self.register_buffer('ape', self.positions)
+        self.embed.weight.requires_grad = False
+        
 
     def forward(self, emb):
         """Embed inputs.
@@ -21,8 +23,8 @@ class AbsolutePositionalEncoding(nn.Module):
             :param embed_src: embedded src inputs,
             shape (batch_size, src_len, embed_size)
         """
-        pos_embeddings = self.embed(self.positions)
-        return emb + pos_embeddings[:emb.size(1), :]
+        ape = self.embed(self.positions)
+        return emb + ape[:emb.size(1), :]
 
 
 class MultiStepAttention(nn.Module):
