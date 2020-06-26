@@ -64,6 +64,7 @@ model:
     decoder:
         type: "convSeq2Seq"
         num_layers: 2
+        use_multi_head: True
         num_heads: 4
         embeddings:
             embedding_dim: 64

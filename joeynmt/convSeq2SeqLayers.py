@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
+from joeynmt.transformer_layers import MultiHeadedAttention
 import torch.nn.functional as F
+
 
 
 class AbsolutePositionalEncoding(nn.Module):
@@ -12,9 +14,15 @@ class AbsolutePositionalEncoding(nn.Module):
 
         super(AbsolutePositionalEncoding, self).__init__()
         positions = torch.arange(0, max_len)
-        self.positions = positions.cuda()
         self.embed = nn.Embedding(max_len, embedding_size)
         self.embed.weight.requires_grad = False
+        #check if model uses GPU and move positions to GPU if necessary
+        if next(self.parameters()).is_cuda:
+            print('on gpu')
+            self.positions = positions.cuda()
+        else:
+            print('on cpu')
+            self.positions = positions
         
 
     def forward(self, emb):
@@ -109,6 +117,8 @@ class ConvSeq2SeqDecoderLayer(nn.Module):
                  hidden_size: int = 512,
                  embedding_size: int = 64,
                  kernel_size: int = 5,
+                 use_multi_head: bool = False,
+                 num_heads: int = 8,
                  dropout: float = 0.1):
         """
         A single ConvSeq2Seq decoderlayer.
@@ -121,7 +131,11 @@ class ConvSeq2SeqDecoderLayer(nn.Module):
         self.convolution = nn.Conv1d(in_channels=hidden_size,
                                      out_channels=2 * hidden_size,
                                      kernel_size=kernel_size)
-        self.attention = MultiStepAttention(hidden_size=hidden_size, embedding_size=embedding_size)
+        self.use_multi_head = use_multi_head
+        if use_multi_head:
+            self.attention = MultiHeadedAttention(num_heads=num_heads,size=hidden_size)
+        else:
+            self.attention = MultiStepAttention(hidden_size=hidden_size, embedding_size=embedding_size)
         self.kernel_size = kernel_size
         self.dropout = nn.Dropout(p=dropout)
 
@@ -129,7 +143,7 @@ class ConvSeq2SeqDecoderLayer(nn.Module):
     def forward(self,
                 x: Tensor,
                 trg_embed: Tensor,
-                encoder_hidden: Tensor,
+                encoder_output: Tensor,
                 src_embed: Tensor) -> Tensor:
         """
         Forward pass for a single Convolutional Seq2Seq decoder layer.
@@ -145,7 +159,11 @@ class ConvSeq2SeqDecoderLayer(nn.Module):
         x = F.pad(x, (self.kernel_size-1, 0), "constant", 0)
         x = self.convolution(x)
         x = F.glu(x, dim=1)
-        attention, x = self.attention(x, trg_embed, encoder_hidden, src_embed)
+        if self.use_multi_head:
+            x = self.attention(encoder_output, encoder_output, x.permute(0,2,1))
+            x = x.permute(0,2,1)
+        else:
+            attention, x = self.attention(x, trg_embed, encoder_output, src_embed)
         x += residual
         return x
 

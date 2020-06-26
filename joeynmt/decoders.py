@@ -544,6 +544,8 @@ class ConvSeq2SeqDecoder(Decoder):
                  emb_dropout: float = 0.1,
                  vocab_size: int = 1,
                  freeze: bool = False,
+                 use_multi_head: bool = False,
+                 num_heads: int = 8,
                  **kwargs):
         """
         Initialize a ConvSeq2Seq decoder.
@@ -566,6 +568,8 @@ class ConvSeq2SeqDecoder(Decoder):
                                         hidden_size=hidden_size,
                                         embedding_size=emb_size,
                                         kernel_size=kernel_size,
+                                        use_multi_head=use_multi_head,
+                                        num_heads=num_heads,
                                         dropout=dropout) for _ in range(num_layers)])
 
         self.absPE = AbsolutePositionalEncoding(emb_size)
