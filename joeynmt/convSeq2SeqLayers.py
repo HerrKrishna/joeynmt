@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -18,10 +19,8 @@ class AbsolutePositionalEncoding(nn.Module):
         self.embed.weight.requires_grad = False
         #check if model uses GPU and move positions to GPU if necessary
         if next(self.parameters()).is_cuda:
-            print('on gpu')
             self.positions = positions.cuda()
         else:
-            print('on cpu')
             self.positions = positions
         
 
@@ -50,6 +49,7 @@ class MultiStepAttention(nn.Module):
                 encoder_out: Tensor,
                 src_embed: Tensor) -> (Tensor, Tensor):
 
+        seq_len = src_embed.size()[1]
         x = x.permute(0, 2, 1)
         x = self.hidden2emb(x)
         queries = x + trg_embed
@@ -88,6 +88,7 @@ class ConvSeq2SeqEncoderLayer(nn.Module):
                                      kernel_size=kernel_size,
                                      padding=(kernel_size - 1) // 2)
         self.dropout = nn.Dropout(p=dropout)
+        self.scaling = math.sqrt(0.5)
 
     # pylint: disable=arguments-differ
     def forward(self, x: Tensor) -> Tensor:
@@ -104,6 +105,7 @@ class ConvSeq2SeqEncoderLayer(nn.Module):
         x = self.convolution(x)
         x = F.glu(x, dim=1)
         x += residual
+        x *= self.scaling
         return x
 
 
@@ -138,6 +140,7 @@ class ConvSeq2SeqDecoderLayer(nn.Module):
             self.attention = MultiStepAttention(hidden_size=hidden_size, embedding_size=embedding_size)
         self.kernel_size = kernel_size
         self.dropout = nn.Dropout(p=dropout)
+        self.scaling = math.sqrt(0.5)
 
     # pylint: disable=arguments-differ
     def forward(self,
@@ -165,5 +168,6 @@ class ConvSeq2SeqDecoderLayer(nn.Module):
         else:
             attention, x = self.attention(x, trg_embed, encoder_output, src_embed)
         x += residual
+        x *= self.scaling
         return x
 
