@@ -18,11 +18,11 @@ class AbsolutePositionalEncoding(nn.Module):
         self.embed = nn.Embedding(max_len, embedding_size)
         self.embed.weight.requires_grad = False
         #check if model uses GPU and move positions to GPU if necessary
-        if next(self.parameters()).is_cuda:
-            self.positions = positions.cuda()
-        else:
-            self.positions = positions
-        
+        #if next(self.parameters()).is_cuda:
+        #    self.positions = positions.cuda()
+        #else:
+        #    self.positions = positions
+        self.positions = positions.cuda()
 
     def forward(self, emb):
         """Embed inputs.
