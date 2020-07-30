@@ -111,6 +111,15 @@ def subsequent_mask(size: int) -> Tensor:
     mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
     return torch.from_numpy(mask) == 0
 
+def separator_mask(size: int, sep_positions: Tensor) -> Tensor:
+    mask = []
+    for sep_position in sep_positions:
+        sep_position = sep_position[1]
+        src_part = torch.ones((size, sep_position + 1), dtype=torch.bool)
+        trg_part = torch.zeros([size, size - (sep_position + 1)], dtype=torch.bool)
+        mask.append(torch.cat([src_part, trg_part], dim=1))
+    mask = torch.stack(mask, dim=0)
+    return mask
 
 def set_seed(seed: int) -> None:
     """
@@ -141,16 +150,23 @@ def log_data_info(train_data: Dataset, valid_data: Dataset, test_data: Dataset,
             len(train_data), len(valid_data),
             len(test_data) if test_data is not None else 0)
 
-    logging_function("First training example:\n\t[SRC] %s\n\t[TRG] %s",
-        " ".join(vars(train_data[0])['src']),
-        " ".join(vars(train_data[0])['trg']))
+    if src_vocab is not None:
+        logging_function("First training example:\n\t[SRC] %s\n\t[TRG] %s",
+            " ".join(vars(train_data[0])['src']),
+            " ".join(vars(train_data[0])['trg']))
+    else:
+        logging_function("First training example:\n\t[TRG] %s",
+                         " ".join(vars(train_data[0])['trg']))
 
-    logging_function("First 10 words (src): %s", " ".join(
-        '(%d) %s' % (i, t) for i, t in enumerate(src_vocab.itos[:10])))
+    if src_vocab is not None:
+        logging_function("First 10 words (src): %s", " ".join(
+            '(%d) %s' % (i, t) for i, t in enumerate(src_vocab.itos[:10])))
+
     logging_function("First 10 words (trg): %s", " ".join(
         '(%d) %s' % (i, t) for i, t in enumerate(trg_vocab.itos[:10])))
 
-    logging_function("Number of Src words (types): %d", len(src_vocab))
+    if src_vocab is not None:
+        logging_function("Number of Src words (types): %d", len(src_vocab))
     logging_function("Number of Trg words (types): %d", len(trg_vocab))
 
 

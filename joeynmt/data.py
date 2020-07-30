@@ -12,7 +12,7 @@ from torchtext.datasets import TranslationDataset
 from torchtext import data
 from torchtext.data import Dataset, Iterator, Field
 
-from joeynmt.constants import UNK_TOKEN, EOS_TOKEN, BOS_TOKEN, PAD_TOKEN
+from joeynmt.constants import UNK_TOKEN, EOS_TOKEN, BOS_TOKEN, PAD_TOKEN, SEP_TOKEN
 from joeynmt.vocabulary import build_vocab, Vocabulary
 
 
@@ -48,71 +48,120 @@ def load_data(data_cfg: dict) -> (Dataset, Dataset, Optional[Dataset],
     level = data_cfg["level"]
     lowercase = data_cfg["lowercase"]
     max_sent_length = data_cfg["max_sent_length"]
-
+    type = data_cfg.get("type", 'src-trg')
     tok_fun = lambda s: list(s) if level == "char" else s.split()
 
-    src_field = data.Field(init_token=None, eos_token=EOS_TOKEN,
+    if type == "TwoInOne":
+        field = data.Field(init_token=BOS_TOKEN, eos_token=EOS_TOKEN,
                            pad_token=PAD_TOKEN, tokenize=tok_fun,
                            batch_first=True, lower=lowercase,
                            unk_token=UNK_TOKEN,
+                           preprocessing=lambda x: (x[0] + ' ' + SEP_TOKEN + ' ' + x[1]).split(),
                            include_lengths=True)
 
-    trg_field = data.Field(init_token=BOS_TOKEN, eos_token=EOS_TOKEN,
-                           pad_token=PAD_TOKEN, tokenize=tok_fun,
-                           unk_token=UNK_TOKEN,
-                           batch_first=True, lower=lowercase,
-                           include_lengths=True)
+        train_data = TwoInOneDataset(path=train_path,
+                                     exts=("." + src_lang, "." + trg_lang),
+                                     field=field,
+                                     filter_pred=
+                                     lambda x: len(vars(x)['trg'])
+                                               <= max_sent_length)
 
-    train_data = TranslationDataset(path=train_path,
-                                    exts=("." + src_lang, "." + trg_lang),
-                                    fields=(src_field, trg_field),
-                                    filter_pred=
-                                    lambda x: len(vars(x)['src'])
-                                    <= max_sent_length
-                                    and len(vars(x)['trg'])
-                                    <= max_sent_length)
+        trg_max_size = data_cfg.get("trg_voc_limit", sys.maxsize)
+        trg_min_freq = data_cfg.get("trg_voc_min_freq", 1)
 
-    src_max_size = data_cfg.get("src_voc_limit", sys.maxsize)
-    src_min_freq = data_cfg.get("src_voc_min_freq", 1)
-    trg_max_size = data_cfg.get("trg_voc_limit", sys.maxsize)
-    trg_min_freq = data_cfg.get("trg_voc_min_freq", 1)
+        trg_vocab_file = data_cfg.get("trg_vocab", None)
 
-    src_vocab_file = data_cfg.get("src_vocab", None)
-    trg_vocab_file = data_cfg.get("trg_vocab", None)
+        trg_vocab = build_vocab(field="trg", min_freq=trg_min_freq,
+                                max_size=trg_max_size,
+                                dataset=train_data, vocab_file=trg_vocab_file)
 
-    src_vocab = build_vocab(field="src", min_freq=src_min_freq,
-                            max_size=src_max_size,
-                            dataset=train_data, vocab_file=src_vocab_file)
-    trg_vocab = build_vocab(field="trg", min_freq=trg_min_freq,
-                            max_size=trg_max_size,
-                            dataset=train_data, vocab_file=trg_vocab_file)
+        random_train_subset = data_cfg.get("random_train_subset", -1)
+        if random_train_subset > -1:
+            # select this many training examples randomly and discard the rest
+            keep_ratio = random_train_subset / len(train_data)
+            keep, _ = train_data.split(
+                split_ratio=[keep_ratio, 1 - keep_ratio],
+                random_state=random.getstate())
+            train_data = keep
 
-    random_train_subset = data_cfg.get("random_train_subset", -1)
-    if random_train_subset > -1:
-        # select this many training examples randomly and discard the rest
-        keep_ratio = random_train_subset / len(train_data)
-        keep, _ = train_data.split(
-            split_ratio=[keep_ratio, 1 - keep_ratio],
-            random_state=random.getstate())
-        train_data = keep
+        dev_data = TwoInOneDataset(path=dev_path,
+                                   exts=("." + src_lang, "." + trg_lang),
+                                   field=field)
+        test_data = None
+        if test_path is not None:
+            # check if target exists
+            if os.path.isfile(test_path + "." + trg_lang):
+                test_data = TwoInOneDataset(
+                    path=test_path, exts=("." + src_lang, "." + trg_lang),
+                    field=field)
 
-    dev_data = TranslationDataset(path=dev_path,
-                                  exts=("." + src_lang, "." + trg_lang),
-                                  fields=(src_field, trg_field))
-    test_data = None
-    if test_path is not None:
-        # check if target exists
-        if os.path.isfile(test_path + "." + trg_lang):
-            test_data = TranslationDataset(
-                path=test_path, exts=("." + src_lang, "." + trg_lang),
-                fields=(src_field, trg_field))
-        else:
-            # no target is given -> create dataset from src only
-            test_data = MonoDataset(path=test_path, ext="." + src_lang,
-                                    field=src_field)
-    src_field.vocab = src_vocab
-    trg_field.vocab = trg_vocab
-    return train_data, dev_data, test_data, src_vocab, trg_vocab
+        field.vocab = trg_vocab
+        return train_data, dev_data, test_data, None, trg_vocab
+
+    else:
+
+        src_field = data.Field(init_token=None, eos_token=EOS_TOKEN,
+                               pad_token=PAD_TOKEN, tokenize=tok_fun,
+                               batch_first=True, lower=lowercase,
+                               unk_token=UNK_TOKEN,
+                               include_lengths=True)
+
+        trg_field = data.Field(init_token=BOS_TOKEN, eos_token=EOS_TOKEN,
+                               pad_token=PAD_TOKEN, tokenize=tok_fun,
+                               unk_token=UNK_TOKEN,
+                               batch_first=True, lower=lowercase,
+                               include_lengths=True)
+
+        train_data = TranslationDataset(path=train_path,
+                                        exts=("." + src_lang, "." + trg_lang),
+                                        fields=(src_field, trg_field),
+                                        filter_pred=
+                                        lambda x: len(vars(x)['src'])
+                                        <= max_sent_length
+                                        and len(vars(x)['trg'])
+                                        <= max_sent_length)
+
+        src_max_size = data_cfg.get("src_voc_limit", sys.maxsize)
+        src_min_freq = data_cfg.get("src_voc_min_freq", 1)
+        trg_max_size = data_cfg.get("trg_voc_limit", sys.maxsize)
+        trg_min_freq = data_cfg.get("trg_voc_min_freq", 1)
+
+        src_vocab_file = data_cfg.get("src_vocab", None)
+        trg_vocab_file = data_cfg.get("trg_vocab", None)
+
+        src_vocab = build_vocab(field="src", min_freq=src_min_freq,
+                                max_size=src_max_size,
+                                dataset=train_data, vocab_file=src_vocab_file)
+        trg_vocab = build_vocab(field="trg", min_freq=trg_min_freq,
+                                max_size=trg_max_size,
+                                dataset=train_data, vocab_file=trg_vocab_file)
+
+        random_train_subset = data_cfg.get("random_train_subset", -1)
+        if random_train_subset > -1:
+            # select this many training examples randomly and discard the rest
+            keep_ratio = random_train_subset / len(train_data)
+            keep, _ = train_data.split(
+                split_ratio=[keep_ratio, 1 - keep_ratio],
+                random_state=random.getstate())
+            train_data = keep
+
+        dev_data = TranslationDataset(path=dev_path,
+                                      exts=("." + src_lang, "." + trg_lang),
+                                      fields=(src_field, trg_field))
+        test_data = None
+        if test_path is not None:
+            # check if target exists
+            if os.path.isfile(test_path + "." + trg_lang):
+                test_data = TranslationDataset(
+                    path=test_path, exts=("." + src_lang, "." + trg_lang),
+                    fields=(src_field, trg_field))
+            else:
+                # no target is given -> create dataset from src only
+                test_data = MonoDataset(path=test_path, ext="." + src_lang,
+                                        field=src_field)
+        src_field.vocab = src_vocab
+        trg_field.vocab = trg_vocab
+        return train_data, dev_data, test_data, src_vocab, trg_vocab
 
 
 # pylint: disable=global-at-module-level
@@ -155,22 +204,118 @@ def make_data_iter(dataset: Dataset,
     """
 
     batch_size_fn = token_batch_size_fn if batch_type == "token" else None
-
-    if train:
-        # optionally shuffle and sort during training
-        data_iter = data.BucketIterator(
+    dec_only = 'src' not in dataset.fields
+    if dec_only:
+        sort_key = lambda x: x.trg.index(SEP_TOKEN)
+        data_iter = TwoInOneIterator(
             repeat=False, sort=False, dataset=dataset,
             batch_size=batch_size, batch_size_fn=batch_size_fn,
             train=True, sort_within_batch=True,
-            sort_key=lambda x: len(x.src), shuffle=shuffle)
+            sort_key=sort_key, shuffle=shuffle)
     else:
-        # don't sort/shuffle for validation/inference
-        data_iter = data.BucketIterator(
-            repeat=False, dataset=dataset,
-            batch_size=batch_size, batch_size_fn=batch_size_fn,
-            train=False, sort=False)
+        sort_key = lambda x: len(x.src)
+        if train:
+            # optionally shuffle and sort during training
+            data_iter = data.BucketIterator(
+                repeat=False, sort=False, dataset=dataset,
+                batch_size=batch_size, batch_size_fn=batch_size_fn,
+                train=True, sort_within_batch=True,
+                sort_key=sort_key, shuffle=shuffle)
+        else:
+            data_iter = data.BucketIterator(
+                repeat=False, dataset=dataset,
+                batch_size=batch_size, batch_size_fn=batch_size_fn,
+                train=False, sort=False)
 
     return data_iter
+
+class TwoInOneIterator(Iterator):
+    """Defines an iterator that batches examples together, that
+       have the same amount of tokens before the <sep> token.
+       Yields smaller batches if this is not possible with batch size.
+    """
+
+    def create_batches(self):
+
+        self.batches = batch(self.data(), self.batch_size,
+                             self.sort_key, self.batch_size_fn)
+
+
+def batch(data, batch_size, sort_key, batch_size_fn=None):
+    """Yield elements from data in chunks of batch_size."""
+    if batch_size_fn is None:
+        def batch_size_fn(new, count, sofar):
+            return count
+
+    data = sorted(data, key=sort_key)
+
+    minibatch, size_so_far = [], 0
+    for ex in data:
+        if minibatch:
+            minibatch_sep_location = minibatch[0].trg.index(SEP_TOKEN)
+            new_sep_location = ex.trg.index(SEP_TOKEN)
+            if new_sep_location == minibatch_sep_location:
+                minibatch.append(ex)
+            else:
+                yield minibatch
+                minibatch = [ex]
+                size_so_far = 1
+        else:
+            minibatch.append(ex)
+
+        size_so_far = batch_size_fn(ex, len(minibatch), size_so_far)
+        if size_so_far == batch_size:
+            yield minibatch
+            minibatch, size_so_far = [], 0
+        elif size_so_far > batch_size:
+            yield minibatch[:-1]
+            minibatch, size_so_far = minibatch[-1:], batch_size_fn(ex, 1, 0)
+    if minibatch:
+        yield minibatch
+
+
+
+class TwoInOneDataset(Dataset):
+    """Defines a dataset for machine translation
+       with only one field in which source and target
+       sentences are separated by the separator token."""
+
+    @staticmethod
+    def sort_key(ex):
+        return len(ex.trg)
+
+    def __init__(self, path: str,  exts: tuple, field: Field, **kwargs) -> None:
+        """
+        Create a monolingual dataset (=only sources) given path and field.
+
+        :param path: Prefix of path to the data file
+        :param ext: Containing the extension to path for this language.
+        :param field: Containing the fields that will be used for data.
+        :param kwargs: Passed to the constructor of data.Dataset.
+        """
+
+        fields = [('trg', field)]
+
+        if hasattr(path, "readline"):  # special usage: stdin
+            src_file = path
+        else:
+            src_path = os.path.expanduser(path + exts[0])
+            src_file = open(src_path)
+            trg_path = os.path.expanduser(path + exts[1])
+            trg_file = open(trg_path)
+
+        examples = []
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            if src_line != '' and trg_line != '':
+                examples.append(data.Example.fromlist(
+                    [[src_line, trg_line]], fields))
+
+        src_file.close()
+        trg_file.close()
+
+        super(TwoInOneDataset, self).__init__(examples, fields, **kwargs)
 
 
 class MonoDataset(Dataset):

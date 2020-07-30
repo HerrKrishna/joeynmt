@@ -15,7 +15,7 @@ data:
     #trg_vocab: "my_model/trg_vocab.txt"
 
 testing:
-    beam_size: 5
+    beam_size: 1
     alpha: 1.0
 
 training:
@@ -28,14 +28,14 @@ training:
     learning_rate_min: 0.00000001
     label_smoothing: 0.1
     weight_decay: 0.0
-    batch_size: 250
-    batch_type: "token"
-    epochs: 30
-    validation_freq: 1000
-    logging_freq: 100
+    batch_size: 10
+    batch_type: "sentence"
+    epochs: 1000
+    validation_freq: 2000
+    logging_freq: 500
     eval_metric: "bleu"
     model_dir: "models/transformer_reverse"
-    overwrite: False
+    overwrite: True
     shuffle: True
     use_cuda: False
     max_output_length: 30

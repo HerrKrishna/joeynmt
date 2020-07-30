@@ -10,7 +10,7 @@ import numpy as np
 from torchtext.data import Dataset
 
 from joeynmt.constants import UNK_TOKEN, DEFAULT_UNK_ID, \
-    EOS_TOKEN, BOS_TOKEN, PAD_TOKEN
+    EOS_TOKEN, BOS_TOKEN, PAD_TOKEN, SEP_TOKEN
 
 
 class Vocabulary:
@@ -30,7 +30,7 @@ class Vocabulary:
         # warning: stoi grows with unknown tokens, don't use for saving or size
 
         # special symbols
-        self.specials = [UNK_TOKEN, PAD_TOKEN, BOS_TOKEN, EOS_TOKEN]
+        self.specials = [UNK_TOKEN, PAD_TOKEN, BOS_TOKEN, EOS_TOKEN, SEP_TOKEN]
 
         self.stoi = defaultdict(DEFAULT_UNK_ID)
         self.itos = []

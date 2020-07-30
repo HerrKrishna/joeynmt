@@ -17,7 +17,7 @@ from joeynmt.metrics import bleu, chrf, token_accuracy, sequence_accuracy
 from joeynmt.model import build_model, Model
 from joeynmt.batch import Batch
 from joeynmt.data import load_data, make_data_iter, MonoDataset
-from joeynmt.constants import UNK_TOKEN, PAD_TOKEN, EOS_TOKEN
+from joeynmt.constants import UNK_TOKEN, PAD_TOKEN, EOS_TOKEN, SEP_TOKEN
 from joeynmt.vocabulary import Vocabulary
 
 
@@ -29,7 +29,8 @@ def validate_on_data(model: Model, data: Dataset,
                      level: str, eval_metric: Optional[str],
                      loss_function: torch.nn.Module = None,
                      beam_size: int = 1, beam_alpha: int = -1,
-                     batch_type: str = "sentence"
+                     batch_type: str = "sentence",
+                     sep_index: int = None
                      ) \
         -> (float, float, float, List[str], List[List[str]], List[str],
             List[str], List[List[str]], List[np.array]):
@@ -75,7 +76,12 @@ def validate_on_data(model: Model, data: Dataset,
         dataset=data, batch_size=batch_size, batch_type=batch_type,
         shuffle=False, train=False)
     valid_sources_raw = data.src
-    pad_index = model.src_vocab.stoi[PAD_TOKEN]
+    if model.src_vocab is not None:
+        pad_index = model.src_vocab.stoi[PAD_TOKEN]
+    else:
+        pad_index = model.trg_vocab.stoi[PAD_TOKEN]
+
+
     # disable dropout
     model.eval()
     # don't track gradients during validation
@@ -87,8 +93,7 @@ def validate_on_data(model: Model, data: Dataset,
         total_nseqs = 0
         for valid_batch in iter(valid_iter):
             # run as during training to get validation loss (e.g. xent)
-
-            batch = Batch(valid_batch, pad_index, use_cuda=use_cuda)
+            batch = Batch(valid_batch, pad_index, use_cuda=use_cuda, sep_index=sep_index)
             # sort batch now by src length and keep track of order
             sort_reverse_index = batch.sort_by_src_lengths()
 
@@ -125,13 +130,17 @@ def validate_on_data(model: Model, data: Dataset,
         # decode back to symbols
         decoded_valid = model.trg_vocab.arrays_to_sentences(arrays=all_outputs,
                                                             cut_at_eos=True)
-
         # evaluate with metric on full dataset
-        join_char = " " if level in ["word", "bpe"] else ""
-        valid_sources = [join_char.join(s) for s in data.src]
-        valid_references = [join_char.join(t) for t in data.trg]
-        valid_hypotheses = [join_char.join(t) for t in decoded_valid]
-
+        if len(list(data.src)) != 0: # this is True if we use an encoder-decoder model
+            join_char = " " if level in ["word", "bpe"] else ""
+            valid_sources = [join_char.join(s) for s in data.src]
+            valid_references = [join_char.join(t) for t in data.trg]
+            valid_hypotheses = [join_char.join(t) for t in decoded_valid]
+        else:
+            join_char = " " if level in ["word", "bpe"] else ""
+            valid_sources = [join_char.join(t[:t.index(SEP_TOKEN)]) for t in data.trg]
+            valid_references = [join_char.join(t[t.index(SEP_TOKEN) + 1:]) for t in data.trg]
+            valid_hypotheses = [join_char.join(t[t.index(SEP_TOKEN) + 1:]) for t in decoded_valid]
         # post-process
         if level == "bpe":
             valid_sources = [bpe_postprocess(s) for s in valid_sources]
@@ -214,6 +223,11 @@ def test(cfg_file,
     _, dev_data, test_data, src_vocab, trg_vocab = load_data(
         data_cfg=cfg["data"])
 
+    if src_vocab is None:
+        sep_index = trg_vocab.stoi[SEP_TOKEN]
+    else:
+        sep_index = None
+
     data_to_predict = {"dev": dev_data, "test": test_data}
 
     # load model state from disk
@@ -243,7 +257,7 @@ def test(cfg_file,
             batch_type=batch_type, level=level,
             max_output_length=max_output_length, eval_metric=eval_metric,
             use_cuda=use_cuda, loss_function=None, beam_size=beam_size,
-            beam_alpha=beam_alpha, logger=logger)
+            beam_alpha=beam_alpha, logger=logger, sep_index=sep_index)
         #pylint: enable=unused-variable
 
         if "trg" in data_set.fields:

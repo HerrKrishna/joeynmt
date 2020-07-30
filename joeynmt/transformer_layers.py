@@ -217,7 +217,8 @@ class TransformerDecoderLayer(nn.Module):
                  size: int = 0,
                  ff_size: int = 0,
                  num_heads: int = 0,
-                 dropout: float = 0.1):
+                 dropout: float = 0.1,
+                 use_enc_dec_att: bool = True):
         """
         Represents a single Transformer decoder layer.
 
@@ -233,8 +234,11 @@ class TransformerDecoderLayer(nn.Module):
 
         self.trg_trg_att = MultiHeadedAttention(num_heads, size,
                                                 dropout=dropout)
-        self.src_trg_att = MultiHeadedAttention(num_heads, size,
-                                                dropout=dropout)
+        if use_enc_dec_att:
+            self.src_trg_att = MultiHeadedAttention(num_heads, size,
+                                                    dropout=dropout)
+        else:
+            self.src_trg_att = None
 
         self.feed_forward = PositionwiseFeedForward(size, ff_size=ff_size,
                                                     dropout=dropout)
@@ -264,11 +268,13 @@ class TransformerDecoderLayer(nn.Module):
         h1 = self.trg_trg_att(x_norm, x_norm, x_norm, mask=trg_mask)
         h1 = self.dropout(h1) + x
 
-        # source-target attention
-        h1_norm = self.dec_layer_norm(h1)
-        h2 = self.src_trg_att(memory, memory, h1_norm, mask=src_mask)
-
-        # final position-wise feed-forward layer
-        o = self.feed_forward(self.dropout(h2) + h1)
+        if self.src_trg_att is not None:
+            # source-target attention
+            h1_norm = self.dec_layer_norm(h1)
+            h2 = self.src_trg_att(memory, memory, h1_norm, mask=src_mask)
+            # final position-wise feed-forward layer
+            o = self.feed_forward(self.dropout(h2) + h1)
+        else:
+            o = self.feed_forward(h1)
 
         return o

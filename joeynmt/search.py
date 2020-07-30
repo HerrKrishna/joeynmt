@@ -7,6 +7,7 @@ import numpy as np
 from joeynmt.decoders import Decoder, TransformerDecoder
 from joeynmt.embeddings import Embeddings
 from joeynmt.helpers import tile
+from joeynmt.batch import Batch
 
 
 __all__ = ["greedy", "transformer_greedy", "beam_search"]
@@ -14,8 +15,8 @@ __all__ = ["greedy", "transformer_greedy", "beam_search"]
 
 def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
            max_output_length: int, decoder: Decoder,
-           encoder_output: Tensor, encoder_hidden: Tensor)\
-        -> (np.array, np.array):
+           encoder_output: Tensor, encoder_hidden: Tensor,
+           batch: Batch, sep_index: int, pad_index: int)-> (np.array, np.array):
     """
     Greedy decoding. Select the token word highest probability at each time
     step. This function is a wrapper that calls recurrent_greedy for
@@ -41,13 +42,15 @@ def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
 
     return greedy_fun(
         src_mask, embed, bos_index, eos_index, max_output_length,
-        decoder, encoder_output, encoder_hidden)
+        decoder, encoder_output, encoder_hidden, batch, sep_index, pad_index)
 
 
 def recurrent_greedy(
         src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
         max_output_length: int, decoder: Decoder,
-        encoder_output: Tensor, encoder_hidden: Tensor) -> (np.array, np.array):
+        encoder_output: Tensor, encoder_hidden: Tensor,
+        batch: Batch = None, sep_index: int = None,
+        pad_index: int = None) -> (np.array, np.array):
     """
     Greedy decoding: in each step, choose the word that gets highest score.
     Version for recurrent decoder.
@@ -110,7 +113,9 @@ def transformer_greedy(
         src_mask: Tensor, embed: Embeddings,
         bos_index: int, eos_index: int,
         max_output_length: int, decoder: Decoder,
-        encoder_output: Tensor, encoder_hidden: Tensor) -> (np.array, None):
+        encoder_output: Tensor, encoder_hidden: Tensor,
+        batch: Batch = None, sep_index: int = None,
+        pad_index: int = None) -> (np.array, None):
     """
     Special greedy function for transformer, since it works differently.
     The transformer remembers all previous states and attends to them.
@@ -127,17 +132,20 @@ def transformer_greedy(
         - stacked_output: output hypotheses (2d array of indices),
         - stacked_attention_scores: attention scores (3d array)
     """
+    batch_size = batch.trg.size()[0]
+    dec_only = encoder_output is None
 
-    batch_size = src_mask.size(0)
-
-    # start with BOS-symbol for each sentence in the batch
-    ys = encoder_output.new_full([batch_size, 1], bos_index, dtype=torch.long)
+    if dec_only:
+        sep_location = (batch.trg_input == sep_index).nonzero()[0, 1]
+        ys = batch.trg_input[:, :sep_location + 1]
+    else:
+        # start with BOS-symbol for each sentence in the batch
+        ys = encoder_output.new_full([batch_size, 1], bos_index, dtype=torch.long)
 
     # a subsequent mask is intersected with this in decoder forward pass
-    trg_mask = src_mask.new_ones([1, 1, 1])
-
-    finished = src_mask.new_zeros((batch_size)).byte()
-
+    trg_mask = torch.ones([1, 1, 1], dtype=torch.bool)
+    sep_mask = trg_mask
+    finished = trg_mask.new_zeros((batch_size)).byte()
     for _ in range(max_output_length):
 
         trg_embed = embed(ys)  # embed the previous tokens
@@ -151,7 +159,8 @@ def transformer_greedy(
                 src_mask=src_mask,
                 unroll_steps=None,
                 hidden=None,
-                trg_mask=trg_mask
+                trg_mask=trg_mask,
+                sep_mask=sep_mask
             )
 
             logits = logits[:, -1]
@@ -170,6 +179,80 @@ def transformer_greedy(
     return ys.detach().cpu().numpy(), None
 
 
+# pylint: disable=unused-argument
+def transformer_dec_only_greedy(
+        src_mask: Tensor, embed: Embeddings,
+        bos_index: int, eos_index: int,
+        max_output_length: int, decoder: Decoder,
+        encoder_output: Tensor, encoder_hidden: Tensor,
+        batch: Batch, sep_index: int,
+        pad_index: int = None) -> (np.array, None):
+    """
+    Special greedy function for transformer, since it works differently.
+    The transformer remembers all previous states and attends to them.
+
+    :param src_mask: mask for source inputs, 0 for positions after </s>
+    :param embed: target embedding layer
+    :param bos_index: index of <s> in the vocabulary
+    :param eos_index: index of </s> in the vocabulary
+    :param max_output_length: maximum length for the hypotheses
+    :param decoder: decoder to use for greedy decoding
+    :param encoder_output: encoder hidden states for attention
+    :param encoder_hidden: encoder final state (unused in Transformer)
+    :return:
+        - stacked_output: output hypotheses (2d array of indices),
+        - stacked_attention_scores: attention scores (3d array)
+    """
+    batch_size = batch.trg.size()[0]
+    # start with BOS-symbol for each sentence in the batch
+    sep_locations = (batch.trg_input == sep_index).nonzero()
+    start_sequences = []
+    locs = []
+    for i in range(batch_size):
+        seq = batch.trg_input[i]
+        sep_location = sep_locations[i, 1]
+        locs.append(sep_location)
+        seq = seq[:sep_location + 1]
+        start_sequences.append(seq)
+    #print(locs)
+    # a subsequent mask is intersected with this in decoder forward pass
+    trg_mask = torch.ones([1, 1, 1], dtype=torch.bool)
+    sep_mask = trg_mask
+    out_sequences = []
+    for sequence in start_sequences:
+        finished = False
+        sequence = sequence.unsqueeze(0)
+        for _ in range(max_output_length):
+            trg_embed = embed(sequence)  # embed the previous tokens
+
+            # pylint: disable=unused-variable
+            with torch.no_grad():
+                logits, out, _, _ = decoder(
+                    trg_embed=trg_embed,
+                    encoder_output=encoder_output,
+                    encoder_hidden=None,
+                    src_mask=src_mask,
+                    unroll_steps=None,
+                    hidden=None,
+                    trg_mask=trg_mask,
+                    sep_mask=sep_mask
+                )
+
+                logits = logits[:, -1]
+                _, next_word = torch.max(logits, dim=1)
+                next_word = next_word.data
+                sequence = torch.cat([sequence, next_word.unsqueeze(-1)], dim=-1)
+            # check if previous symbol was <eos>
+            is_eos = torch.eq(next_word, eos_index)
+            finished = is_eos
+            if finished:
+                break
+        out_sequences.append(sequence[0, 1:])
+
+    ys = torch.nn.utils.rnn.pad_sequence(out_sequences, batch_first=True, padding_value=pad_index)
+    return ys.detach().cpu().numpy(), None
+
+
 # pylint: disable=too-many-statements,too-many-branches
 def beam_search(
         decoder: Decoder,
@@ -177,7 +260,8 @@ def beam_search(
         bos_index: int, eos_index: int, pad_index: int,
         encoder_output: Tensor, encoder_hidden: Tensor,
         src_mask: Tensor, max_output_length: int, alpha: float,
-        embed: Embeddings, n_best: int = 1) -> (np.array, np.array):
+        embed: Embeddings, n_best: int = 1, batch: Batch = None,
+        sep_index: int = None) -> (np.array, np.array):
     """
     Beam search with size k.
     Inspired by OpenNMT-py, adapted for Transformer.
@@ -203,9 +287,11 @@ def beam_search(
     assert size > 0, 'Beam size must be >0.'
     assert n_best <= size, 'Can only return {} best hypotheses.'.format(size)
 
+    dec_only = src_mask is None
+
     # init
     transformer = isinstance(decoder, TransformerDecoder)
-    batch_size = src_mask.size(0)
+    batch_size = batch.trg_input.size()[0]
     att_vectors = None  # not used for Transformer
 
     # Recurrent models only: initialize RNN hidden state
@@ -218,20 +304,22 @@ def beam_search(
     # tile encoder states and decoder initial states beam_size times
     if hidden is not None:
         hidden = tile(hidden, size, dim=1)  # layers x batch*k x dec_hidden_size
-
-    encoder_output = tile(encoder_output.contiguous(), size,
-                          dim=0)  # batch*k x src_len x enc_hidden_size
-    src_mask = tile(src_mask, size, dim=0)  # batch*k x 1 x src_len
+    if not dec_only:
+        encoder_output = tile(encoder_output.contiguous(), size,
+                            dim=0)  # batch*k x src_len x enc_hidden_size
+        src_mask = tile(src_mask, size, dim=0)  # batch*k x 1 x src_len
 
     # Transformer only: create target mask
     if transformer:
-        trg_mask = src_mask.new_ones([1, 1, 1])  # transformer only
+        trg_mask = torch.ones([1, 1, 1], dtype=torch.bool)  # transformer only
     else:
         trg_mask = None
 
+    device = batch.trg_input.device
+
     # numbering elements in the batch
     batch_offset = torch.arange(
-        batch_size, dtype=torch.long, device=encoder_output.device)
+        batch_size, dtype=torch.long, device=device) #, device=trg_input.device)
 
     # numbering elements in the extended batch, i.e. beam size copies of each
     # batch element
@@ -240,18 +328,23 @@ def beam_search(
         batch_size * size,
         step=size,
         dtype=torch.long,
-        device=encoder_output.device)
+        device=device)
+        #device=encoder_output.device)
 
     # keeps track of the top beam size hypotheses to expand for each element
     # in the batch to be further decoded (that are still "alive")
-    alive_seq = torch.full(
-        [batch_size * size, 1],
-        bos_index,
-        dtype=torch.long,
-        device=encoder_output.device)
+    if dec_only:
+        sep_location = (batch.trg_input == sep_index).nonzero()[0,1]
+        alive_seq = torch.cat([batch.trg_input[:, :sep_location + 1]]*size, dim=0).to(device)
+    else:
+        alive_seq = torch.full(
+            [batch_size * size, 1],
+            bos_index,
+            dtype=torch.long,
+            device=device)
 
     # Give full probability to the first beam on the first step.
-    topk_log_probs = torch.zeros(batch_size, size, device=encoder_output.device)
+    topk_log_probs = torch.zeros(batch_size, size, device=device) #, device=encoder_output.device)
     topk_log_probs[:, 1:] = float("-inf")
 
     # Structure that holds finished hypotheses.
@@ -384,8 +477,9 @@ def beam_search(
 
         # reorder indices, outputs and masks
         select_indices = batch_index.view(-1)
-        encoder_output = encoder_output.index_select(0, select_indices)
-        src_mask = src_mask.index_select(0, select_indices)
+        if not dec_only:
+            encoder_output = encoder_output.index_select(0, select_indices)
+            src_mask = src_mask.index_select(0, select_indices)
 
         if hidden is not None and not transformer:
             if isinstance(hidden, tuple):

@@ -445,6 +445,7 @@ class TransformerDecoder(Decoder):
                  num_heads: int = 8,
                  hidden_size: int = 512,
                  ff_size: int = 2048,
+                 use_enc_dec_attention: bool = True,
                  dropout: float = 0.1,
                  emb_dropout: float = 0.1,
                  vocab_size: int = 1,
@@ -471,14 +472,14 @@ class TransformerDecoder(Decoder):
         # create num_layers decoder layers and put them in a list
         self.layers = nn.ModuleList([TransformerDecoderLayer(
                 size=hidden_size, ff_size=ff_size, num_heads=num_heads,
-                dropout=dropout) for _ in range(num_layers)])
+                dropout=dropout, use_enc_dec_att = use_enc_dec_attention) for _ in range(num_layers)])
 
         self.pe = PositionalEncoding(hidden_size)
         self.layer_norm = nn.LayerNorm(hidden_size, eps=1e-6)
 
         self.emb_dropout = nn.Dropout(p=emb_dropout)
         self.output_layer = nn.Linear(hidden_size, vocab_size, bias=False)
-
+        self.use_enc_dec_att = use_enc_dec_attention
         if freeze:
             freeze_params(self)
 
@@ -490,6 +491,7 @@ class TransformerDecoder(Decoder):
                 unroll_steps: int = None,
                 hidden: Tensor = None,
                 trg_mask: Tensor = None,
+                sep_mask: Tensor = None,
                 **kwargs):
         """
         Transformer decoder forward pass.
@@ -512,6 +514,9 @@ class TransformerDecoder(Decoder):
 
         trg_mask = trg_mask & subsequent_mask(
             trg_embed.size(1)).type_as(trg_mask)
+
+        if sep_mask is not None:
+            trg_mask = trg_mask.__or__(sep_mask)
 
         for layer in self.layers:
             x = layer(x=x, memory=encoder_output,

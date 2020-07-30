@@ -1,0 +1,64 @@
+name: "transf_dec_only_reverse"
+
+data:
+    src: "src"
+    trg: "trg"
+    train: "test/data/reverse/train"
+    dev: "test/data/reverse/dev"
+    test: "test/data/reverse/test"
+    level: "word"
+    lowercase: False
+    max_sent_length: 61
+    trg_voc_min_freq: 0
+    trg_voc_limit: 100
+    type: "TwoInOne"
+
+testing:
+    beam_size: 2
+    alpha: 1.0
+
+training:
+    random_seed: 42
+    optimizer: "adam"
+    adam_betas: [0.9, 0.999]
+    scheduling: "plateau"
+    loss: "crossentropy"
+    learning_rate: 0.0002
+    learning_rate_min: 0.00000001
+    label_smoothing: 0.1
+    weight_decay: 0.0
+    batch_size: 10
+    batch_type: "sentence"
+    epochs: 1
+    validation_freq: 2000
+    logging_freq: 500
+    eval_metric: "bleu"
+    model_dir: "models/transformer_dec_only_reverse"
+    overwrite: True
+    shuffle: True
+    use_cuda: False
+    max_output_length: 60
+    print_valid_sents: [0, 3, 6, 9]
+    keep_last_ckpts: 2
+
+model:
+    initializer: "xavier"
+    embed_initializer: "xavier"
+    embed_init_gain: 1.0
+    init_gain: 1.0
+    bias_initializer: "zeros"
+    tied_embeddings: False
+    tied_softmax: True
+    decoder:
+        type: "transformer"
+        num_layers: 2
+        num_heads: 4
+        embeddings:
+            embedding_dim: 64
+            scale: True
+            dropout: 0.
+        # typically ff_size = 4 x hidden_size
+        hidden_size: 64
+        ff_size: 256
+        dropout: 0.1
+        use_enc_dec_attention: False

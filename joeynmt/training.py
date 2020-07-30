@@ -62,6 +62,7 @@ class TrainManager:
         self.model = model
         self.pad_index = self.model.pad_index
         self.bos_index = self.model.bos_index
+        self.sep_index = self.model.sep_index
         self._log_parameters_list()
 
         # objective
@@ -118,7 +119,7 @@ class TrainManager:
             config=train_config,
             scheduler_mode="min" if self.minimize_metric else "max",
             optimizer=self.optimizer,
-            hidden_size=config["model"]["encoder"]["hidden_size"])
+            hidden_size=config["model"]["decoder"]["hidden_size"])
 
         # data & batch handling
         self.level = config["data"]["level"]
@@ -306,8 +307,7 @@ class TrainManager:
                 # reactivate training
                 self.model.train()
                 # create a Batch object from torchtext batch
-                batch = Batch(batch, self.pad_index, use_cuda=self.use_cuda)
-
+                batch = Batch(batch, self.pad_index, use_cuda=self.use_cuda, sep_index=self.sep_index)
                 # only update every batch_multiplier batches
                 # see https://medium.com/@davidlmorton/
                 # increasing-mini-batch-size-without-increasing-
@@ -375,7 +375,8 @@ class TrainManager:
                             max_output_length=self.max_output_length,
                             loss_function=self.loss,
                             beam_size=1,  # greedy validations
-                            batch_type=self.eval_batch_type
+                            batch_type=self.eval_batch_type,
+                            sep_index=self.sep_index
                         )
 
                     self.tb_writer.add_scalar("valid/valid_loss",
@@ -581,19 +582,19 @@ class TrainManager:
         """
         for p in self.log_valid_sents:
 
-            if p >= len(sources):
+            if p >= len(hypotheses):
                 continue
 
             self.logger.info("Example #%d", p)
-
-            if sources_raw is not None:
+            if sources_raw is not None and len(sources_raw) > 0:
                 self.logger.debug("\tRaw source:     %s", sources_raw[p])
             if references_raw is not None:
                 self.logger.debug("\tRaw reference:  %s", references_raw[p])
             if hypotheses_raw is not None:
                 self.logger.debug("\tRaw hypothesis: %s", hypotheses_raw[p])
 
-            self.logger.info("\tSource:     %s", sources[p])
+            if len(sources) > 0:
+                self.logger.info("\tSource:     %s", sources[p])
             self.logger.info("\tReference:  %s", references[p])
             self.logger.info("\tHypothesis: %s", hypotheses[p])
 
@@ -645,7 +646,8 @@ def train(cfg_file: str) -> None:
 
     # store the vocabs
     src_vocab_file = "{}/src_vocab.txt".format(cfg["training"]["model_dir"])
-    src_vocab.to_file(src_vocab_file)
+    if src_vocab is not None:
+        src_vocab.to_file(src_vocab_file)
     trg_vocab_file = "{}/trg_vocab.txt".format(cfg["training"]["model_dir"])
     trg_vocab.to_file(trg_vocab_file)
 

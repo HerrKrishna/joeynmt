@@ -1,16 +1,15 @@
 # coding: utf-8
-
 """
 Implementation of a mini-batch.
 """
-
+from joeynmt.helpers import separator_mask
 
 class Batch:
     """Object for holding a batch of data with mask during training.
     Input is a batch from a torch text iterator.
     """
 
-    def __init__(self, torch_batch, pad_index, use_cuda=False):
+    def __init__(self, torch_batch, pad_index, use_cuda=False, sep_index=None):
         """
         Create a new joey batch from a torch batch.
         This batch extends torch text's batch attributes with src and trg
@@ -21,9 +20,15 @@ class Batch:
         :param pad_index:
         :param use_cuda:
         """
-        self.src, self.src_lengths = torch_batch.src
-        self.src_mask = (self.src != pad_index).unsqueeze(1)
-        self.nseqs = self.src.size(0)
+        if hasattr(torch_batch, 'src'):
+            self.src, self.src_lengths = torch_batch.src
+            self.src_mask = (self.src != pad_index).unsqueeze(1)
+            self.nseqs = self.src.size(0)
+        else:
+            self.src = None
+            self.src_lengths = None
+            self.src_mask = None
+
         self.trg_input = None
         self.trg = None
         self.trg_mask = None
@@ -38,9 +43,18 @@ class Batch:
             self.trg_lengths = trg_lengths
             # trg is used for loss computation, shifted by one since BOS
             self.trg = trg[:, 1:]
+            self.nseqs = self.trg.size(0)
             # we exclude the padded areas from the loss computation
             self.trg_mask = (self.trg_input != pad_index).unsqueeze(1)
             self.ntokens = (self.trg != pad_index).data.sum().item()
+
+            if not hasattr(torch_batch, "src"):
+                if sep_index is None:
+                    print('Need to pass sep index to batch when using dec_only')
+                    raise ValueError
+                # if we  use a dec_only model, we need a separator mask
+                sep_locations = (self.trg_input == sep_index).nonzero()
+                self.sep_mask = separator_mask(self.trg_input.size()[1], sep_locations)
 
         if use_cuda:
             self._make_cuda()
@@ -51,8 +65,12 @@ class Batch:
 
         :return:
         """
-        self.src = self.src.cuda()
-        self.src_mask = self.src_mask.cuda()
+        if self.src is not None:
+            self.src = self.src.cuda()
+            self.src_mask = self.src_mask.cuda()
+        else:
+            self.src = None
+            self.src_mask = None
 
         if self.trg_input is not None:
             self.trg_input = self.trg_input.cuda()
@@ -65,14 +83,43 @@ class Batch:
 
         :return:
         """
-        _, perm_index = self.src_lengths.sort(0, descending=True)
-        rev_index = [0]*perm_index.size(0)
-        for new_pos, old_pos in enumerate(perm_index.cpu().numpy()):
-            rev_index[old_pos] = new_pos
 
-        sorted_src_lengths = self.src_lengths[perm_index]
-        sorted_src = self.src[perm_index]
-        sorted_src_mask = self.src_mask[perm_index]
+        # We have to check for the case that src does not exist
+        # because of decoder only translation.
+        if self.src_lengths is not None:
+            _, perm_index = self.src_lengths.sort(0, descending=True)
+            rev_index = [0]*perm_index.size(0)
+            for new_pos, old_pos in enumerate(perm_index.cpu().numpy()):
+                rev_index[old_pos] = new_pos
+
+            sorted_src_lengths = self.src_lengths[perm_index]
+            sorted_src = self.src[perm_index]
+            sorted_src_mask = self.src_mask[perm_index]
+
+        else:
+            _, perm_index = self.trg_lengths.sort(0, descending=True)
+            rev_index = [0] * perm_index.size(0)
+            for new_pos, old_pos in enumerate(perm_index.cpu().numpy()):
+                rev_index[old_pos] = new_pos
+
+            sorted_trg_input = self.trg_input[perm_index]
+            sorted_trg_lengths = self.trg_lengths[perm_index]
+            sorted_trg = self.trg[perm_index]
+            sorted_trg_mask = self.trg_mask[perm_index]
+            if self.sep_mask is not None:
+                sorted_sep_mask = self.sep_mask[perm_index]
+
+            self.trg_input = sorted_trg_input
+            self.trg_mask = sorted_trg_mask
+            self.trg_lengths = sorted_trg_lengths
+            self.trg = sorted_trg
+            self.sep_mask = sorted_sep_mask
+
+            if self.use_cuda:
+                self._make_cuda()
+
+            return rev_index
+
         if self.trg_input is not None:
             sorted_trg_input = self.trg_input[perm_index]
             sorted_trg_lengths = self.trg_lengths[perm_index]
@@ -93,3 +140,5 @@ class Batch:
             self._make_cuda()
 
         return rev_index
+
+
