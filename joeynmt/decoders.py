@@ -517,6 +517,7 @@ class TransformerDecoder(Decoder):
 
         if sep_mask is not None:
             trg_mask = trg_mask.__or__(sep_mask)
+        print(trg_mask)
 
         for layer in self.layers:
             x = layer(x=x, memory=encoder_output,

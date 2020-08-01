@@ -29,14 +29,14 @@ training:
     weight_decay: 0.0
     batch_size: 10
     batch_type: "sentence"
-    epochs: 1
+    epochs: 100
     validation_freq: 2000
     logging_freq: 500
     eval_metric: "bleu"
     model_dir: "models/transformer_dec_only_reverse"
     overwrite: True
     shuffle: True
-    use_cuda: False
+    use_cuda: True
     max_output_length: 60
     print_valid_sents: [0, 3, 6, 9]
     keep_last_ckpts: 2
@@ -52,7 +52,7 @@ model:
     decoder:
         type: "transformer"
         num_layers: 2
-        num_heads: 4
+        num_heads: 1
         embeddings:
             embedding_dim: 64
             scale: True

@@ -8,7 +8,7 @@ data:
     test: "test/data/iwslt14/test.bpe.32000"
     level: "bpe"
     lowercase: True
-    max_sent_length: 62
+    max_sent_length: 124
     type: "TwoInOne"
 
 testing:
@@ -31,14 +31,14 @@ training:
     batch_size: 8
     batch_type: "sentence"
     early_stopping_metric: "eval_metric"
-    epochs: 100
-    validation_freq: 1000
-    logging_freq: 100
+    epochs: 1000
+    validation_freq: 12000
+    logging_freq: 1000
     eval_metric: "bleu"
     model_dir: "models/transformer_dec_only_iwslt14"
     overwrite: True
     shuffle: True
-    use_cuda: False
+    use_cuda: True
     max_output_length: 100
     print_valid_sents: [0, 1, 2, 3, 4]
     keep_last_ckpts: 5
@@ -53,7 +53,7 @@ model:
     tied_softmax: True
     decoder:
         type: "transformer"
-        num_layers: 6
+        num_layers: 18
         num_heads: 4
         embeddings:
             embedding_dim: 256

@@ -141,9 +141,9 @@ def transformer_greedy(
     else:
         # start with BOS-symbol for each sentence in the batch
         ys = encoder_output.new_full([batch_size, 1], bos_index, dtype=torch.long)
-
+    
     # a subsequent mask is intersected with this in decoder forward pass
-    trg_mask = torch.ones([1, 1, 1], dtype=torch.bool)
+    trg_mask = batch.trg.new_ones([1, 1, 1], dtype=torch.bool)
     sep_mask = trg_mask
     finished = trg_mask.new_zeros((batch_size)).byte()
     for _ in range(max_output_length):
@@ -214,7 +214,7 @@ def transformer_dec_only_greedy(
         locs.append(sep_location)
         seq = seq[:sep_location + 1]
         start_sequences.append(seq)
-    #print(locs)
+    
     # a subsequent mask is intersected with this in decoder forward pass
     trg_mask = torch.ones([1, 1, 1], dtype=torch.bool)
     sep_mask = trg_mask
@@ -311,7 +311,7 @@ def beam_search(
 
     # Transformer only: create target mask
     if transformer:
-        trg_mask = torch.ones([1, 1, 1], dtype=torch.bool)  # transformer only
+        trg_mask = batch.trg.new_ones([1, 1, 1], dtype=torch.bool)  # transformer only
     else:
         trg_mask = None
 

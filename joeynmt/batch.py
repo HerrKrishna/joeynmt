@@ -68,9 +68,11 @@ class Batch:
         if self.src is not None:
             self.src = self.src.cuda()
             self.src_mask = self.src_mask.cuda()
+            self.sep_mask = None
         else:
             self.src = None
             self.src_mask = None
+            self.sep_mask = self.sep_mask.cuda()
 
         if self.trg_input is not None:
             self.trg_input = self.trg_input.cuda()
