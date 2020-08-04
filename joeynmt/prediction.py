@@ -66,6 +66,8 @@ def validate_on_data(model: Model, data: Dataset,
         - decoded_valid: raw validation hypotheses (before post-processing),
         - valid_attention_scores: attention scores for validation hypotheses
     """
+
+    dec_only = model.encoder is None
     if batch_size > 1000 and batch_type == "sentence":
         logger.warning(
             "WARNING: Are you sure you meant to work on huge batches like "
@@ -76,16 +78,16 @@ def validate_on_data(model: Model, data: Dataset,
         dataset=data, batch_size=batch_size, batch_type=batch_type,
         shuffle=False, train=False)
     valid_sources_raw = data.src
-    if model.src_vocab is not None:
-        pad_index = model.src_vocab.stoi[PAD_TOKEN]
-    else:
+    if dec_only:
         pad_index = model.trg_vocab.stoi[PAD_TOKEN]
-
+    else:
+        pad_index = model.src_vocab.stoi[PAD_TOKEN]
 
     # disable dropout
     model.eval()
     # don't track gradients during validation
     with torch.no_grad():
+        all_sources = []
         all_outputs = []
         valid_attention_scores = []
         total_loss = 0
@@ -111,7 +113,16 @@ def validate_on_data(model: Model, data: Dataset,
                 max_output_length=max_output_length)
 
             # sort outputs back to original order
-            all_outputs.extend(output[sort_reverse_index])
+            if dec_only:
+                sources = batch.trg.detach().cpu().numpy()
+                all_sources.extend(sources)
+                sorted_output = output
+                all_outputs.extend(sorted_output)
+            else:
+                sorted_output = output[sort_reverse_index]
+                all_outputs.extend(sorted_output)
+
+
             valid_attention_scores.extend(
                 attention_scores[sort_reverse_index]
                 if attention_scores is not None else [])
@@ -128,19 +139,23 @@ def validate_on_data(model: Model, data: Dataset,
             valid_ppl = -1
 
         # decode back to symbols
+        if dec_only:
+            decoded_sources = model.trg_vocab.arrays_to_sentences(arrays=all_sources,
+                                                                  cut_at_eos=True)
         decoded_valid = model.trg_vocab.arrays_to_sentences(arrays=all_outputs,
                                                             cut_at_eos=True)
-        # evaluate with metric on full dataset
-        if len(list(data.src)) != 0: # this is True if we use an encoder-decoder model
+
+        if dec_only:
+            join_char = " " if level in ["word", "bpe"] else ""
+            valid_sources = [join_char.join(t[:t.index(SEP_TOKEN)]) for t in decoded_sources]
+            valid_references = [join_char.join(t[t.index(SEP_TOKEN) + 1:]) for t in decoded_sources]
+            valid_hypotheses = [join_char.join(t[t.index(SEP_TOKEN) + 1:]) for t in decoded_valid]
+        else:
             join_char = " " if level in ["word", "bpe"] else ""
             valid_sources = [join_char.join(s) for s in data.src]
             valid_references = [join_char.join(t) for t in data.trg]
             valid_hypotheses = [join_char.join(t) for t in decoded_valid]
-        else:
-            join_char = " " if level in ["word", "bpe"] else ""
-            valid_sources = [join_char.join(t[:t.index(SEP_TOKEN)]) for t in data.trg]
-            valid_references = [join_char.join(t[t.index(SEP_TOKEN) + 1:]) for t in data.trg]
-            valid_hypotheses = [join_char.join(t[t.index(SEP_TOKEN) + 1:]) for t in decoded_valid]
+
         # post-process
         if level == "bpe":
             valid_sources = [bpe_postprocess(s) for s in valid_sources]
@@ -249,7 +264,6 @@ def test(cfg_file,
         beam_alpha = -1
 
     for data_set_name, data_set in data_to_predict.items():
-
         #pylint: disable=unused-variable
         score, loss, ppl, sources, sources_raw, references, hypotheses, \
         hypotheses_raw, attention_scores = validate_on_data(

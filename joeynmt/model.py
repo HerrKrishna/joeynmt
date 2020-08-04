@@ -5,6 +5,7 @@ Module to represents whole models
 
 import numpy as np
 
+import torch
 import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
@@ -197,7 +198,6 @@ class Model(nn.Module):
                         bos_index=self.bos_index,
                         decoder=self.decoder,
                         batch=batch, sep_index=self.sep_index)
-
         return stacked_output, stacked_attention_scores
 
     def __repr__(self) -> str:

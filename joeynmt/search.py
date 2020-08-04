@@ -10,7 +10,7 @@ from joeynmt.helpers import tile
 from joeynmt.batch import Batch
 
 
-__all__ = ["greedy", "transformer_greedy", "beam_search"]
+__all__ = ["greedy", "transformer_greedy", "recurrent_greedy", "beam_search"]
 
 
 def greedy(src_mask: Tensor, embed: Embeddings, bos_index: int, eos_index: int,
@@ -141,15 +141,13 @@ def transformer_greedy(
     else:
         # start with BOS-symbol for each sentence in the batch
         ys = encoder_output.new_full([batch_size, 1], bos_index, dtype=torch.long)
-    
+
     # a subsequent mask is intersected with this in decoder forward pass
     trg_mask = batch.trg.new_ones([1, 1, 1], dtype=torch.bool)
     sep_mask = trg_mask
     finished = trg_mask.new_zeros((batch_size)).byte()
     for _ in range(max_output_length):
-
         trg_embed = embed(ys)  # embed the previous tokens
-
         # pylint: disable=unused-variable
         with torch.no_grad():
             logits, out, _, _ = decoder(
@@ -162,7 +160,6 @@ def transformer_greedy(
                 trg_mask=trg_mask,
                 sep_mask=sep_mask
             )
-
             logits = logits[:, -1]
             _, next_word = torch.max(logits, dim=1)
             next_word = next_word.data
@@ -312,8 +309,13 @@ def beam_search(
     # Transformer only: create target mask
     if transformer:
         trg_mask = batch.trg.new_ones([1, 1, 1], dtype=torch.bool)  # transformer only
+        if dec_only:
+            sep_mask = trg_mask
+        else:
+            sep_mask = None
     else:
         trg_mask = None
+        sep_mask = None
 
     device = batch.trg_input.device
 
@@ -329,7 +331,6 @@ def beam_search(
         step=size,
         dtype=torch.long,
         device=device)
-        #device=encoder_output.device)
 
     # keeps track of the top beam size hypotheses to expand for each element
     # in the batch to be further decoded (that are still "alive")
@@ -380,7 +381,8 @@ def beam_search(
             hidden=hidden,
             prev_att_vector=att_vectors,
             unroll_steps=1,
-            trg_mask=trg_mask  # subsequent mask for Transformer only
+            trg_mask=trg_mask,
+            sep_mask=sep_mask
         )
 
         # For the Transformer we made predictions for all time steps up to

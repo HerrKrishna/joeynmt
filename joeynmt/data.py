@@ -205,16 +205,10 @@ def make_data_iter(dataset: Dataset,
 
     batch_size_fn = token_batch_size_fn if batch_type == "token" else None
     dec_only = 'src' not in dataset.fields
+
     if dec_only:
-        sort_key = lambda x: x.trg.index(SEP_TOKEN)
-        data_iter = TwoInOneIterator(
-            repeat=False, sort=False, dataset=dataset,
-            batch_size=batch_size, batch_size_fn=batch_size_fn,
-            train=True, sort_within_batch=True,
-            sort_key=sort_key, shuffle=shuffle)
-    else:
-        sort_key = lambda x: len(x.src)
         if train:
+            sort_key = sort_key = lambda x: len(x.trg)
             # optionally shuffle and sort during training
             data_iter = data.BucketIterator(
                 repeat=False, sort=False, dataset=dataset,
@@ -222,6 +216,23 @@ def make_data_iter(dataset: Dataset,
                 train=True, sort_within_batch=True,
                 sort_key=sort_key, shuffle=shuffle)
         else:
+            sort_key = lambda x: x.trg.index(SEP_TOKEN)
+            #sort_key = lambda x: len(x.trg)
+            data_iter = TwoInOneIterator(
+                repeat=False, sort=False, dataset=dataset,
+                batch_size=batch_size, batch_size_fn=batch_size_fn,
+                train=True, sort_within_batch=True,
+                sort_key=sort_key, shuffle=shuffle)
+    else:
+        if train:
+            # optionally shuffle and sort during training
+            data_iter = data.BucketIterator(
+                repeat=False, sort=False, dataset=dataset,
+                batch_size=batch_size, batch_size_fn=batch_size_fn,
+                train=True, sort_within_batch=True,
+                sort_key=lambda x: len(x.src), shuffle=shuffle)
+        else:
+            # don't sort/shuffle for validation/inference
             data_iter = data.BucketIterator(
                 repeat=False, dataset=dataset,
                 batch_size=batch_size, batch_size_fn=batch_size_fn,

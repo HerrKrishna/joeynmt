@@ -516,9 +516,9 @@ class TransformerDecoder(Decoder):
             trg_embed.size(1)).type_as(trg_mask)
 
         if sep_mask is not None:
+            #print('trg_mask', trg_mask.size())
             trg_mask = trg_mask.__or__(sep_mask)
-        print(trg_mask)
-
+            #print('sep_mask', trg_mask.size())
         for layer in self.layers:
             x = layer(x=x, memory=encoder_output,
                       src_mask=src_mask, trg_mask=trg_mask)

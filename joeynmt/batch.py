@@ -20,23 +20,37 @@ class Batch:
         :param pad_index:
         :param use_cuda:
         """
-        if hasattr(torch_batch, 'src'):
+        dec_only = not hasattr(torch_batch, 'src')
+
+        if not dec_only:
             self.src, self.src_lengths = torch_batch.src
             self.src_mask = (self.src != pad_index).unsqueeze(1)
             self.nseqs = self.src.size(0)
+            self.trg_input = None
+            self.trg = None
+            self.trg_mask = None
+            self.trg_lengths = None
+            self.ntokens = None
+            self.use_cuda = use_cuda
+            self.sep_mask = None
+
+            if hasattr(torch_batch, "trg"):
+                trg, trg_lengths = torch_batch.trg
+                # trg_input is used for teacher forcing, last one is cut off
+                self.trg_input = trg[:, :-1]
+                self.trg_lengths = trg_lengths
+                # trg is used for loss computation, shifted by one since BOS
+                self.trg = trg[:, 1:]
+                # we exclude the padded areas from the loss computation
+                self.trg_mask = (self.trg_input != pad_index).unsqueeze(1)
+                self.ntokens = (self.trg != pad_index).data.sum().item()
+
         else:
             self.src = None
             self.src_lengths = None
             self.src_mask = None
+            self.use_cuda = use_cuda
 
-        self.trg_input = None
-        self.trg = None
-        self.trg_mask = None
-        self.trg_lengths = None
-        self.ntokens = None
-        self.use_cuda = use_cuda
-
-        if hasattr(torch_batch, "trg"):
             trg, trg_lengths = torch_batch.trg
             # trg_input is used for teacher forcing, last one is cut off
             self.trg_input = trg[:, :-1]
@@ -47,14 +61,13 @@ class Batch:
             # we exclude the padded areas from the loss computation
             self.trg_mask = (self.trg_input != pad_index).unsqueeze(1)
             self.ntokens = (self.trg != pad_index).data.sum().item()
+            if sep_index is None:
+                print('Need to pass sep index to batch when using dec_only')
+                raise ValueError
+            # if we  use a dec_only model, we need a separator mask
+            sep_locations = (self.trg_input == sep_index).nonzero()
 
-            if not hasattr(torch_batch, "src"):
-                if sep_index is None:
-                    print('Need to pass sep index to batch when using dec_only')
-                    raise ValueError
-                # if we  use a dec_only model, we need a separator mask
-                sep_locations = (self.trg_input == sep_index).nonzero()
-                self.sep_mask = separator_mask(self.trg_input.size()[1], sep_locations)
+            self.sep_mask = separator_mask(self.trg_input.size()[1], sep_locations)
 
         if use_cuda:
             self._make_cuda()
@@ -65,7 +78,9 @@ class Batch:
 
         :return:
         """
-        if self.src is not None:
+        dec_only = self.src is None
+
+        if not dec_only:
             self.src = self.src.cuda()
             self.src_mask = self.src_mask.cuda()
             self.sep_mask = None
@@ -88,7 +103,8 @@ class Batch:
 
         # We have to check for the case that src does not exist
         # because of decoder only translation.
-        if self.src_lengths is not None:
+        dec_only = self.src_lengths is None
+        if not dec_only:
             _, perm_index = self.src_lengths.sort(0, descending=True)
             rev_index = [0]*perm_index.size(0)
             for new_pos, old_pos in enumerate(perm_index.cpu().numpy()):
@@ -97,50 +113,49 @@ class Batch:
             sorted_src_lengths = self.src_lengths[perm_index]
             sorted_src = self.src[perm_index]
             sorted_src_mask = self.src_mask[perm_index]
+            if self.trg_input is not None:
+                sorted_trg_input = self.trg_input[perm_index]
+                sorted_trg_lengths = self.trg_lengths[perm_index]
+                sorted_trg_mask = self.trg_mask[perm_index]
+                sorted_trg = self.trg[perm_index]
 
-        else:
-            _, perm_index = self.trg_lengths.sort(0, descending=True)
-            rev_index = [0] * perm_index.size(0)
-            for new_pos, old_pos in enumerate(perm_index.cpu().numpy()):
-                rev_index[old_pos] = new_pos
+            self.src = sorted_src
+            self.src_lengths = sorted_src_lengths
+            self.src_mask = sorted_src_mask
+            self.sep_mask = None
 
-            sorted_trg_input = self.trg_input[perm_index]
-            sorted_trg_lengths = self.trg_lengths[perm_index]
-            sorted_trg = self.trg[perm_index]
-            sorted_trg_mask = self.trg_mask[perm_index]
-            if self.sep_mask is not None:
-                sorted_sep_mask = self.sep_mask[perm_index]
-
-            self.trg_input = sorted_trg_input
-            self.trg_mask = sorted_trg_mask
-            self.trg_lengths = sorted_trg_lengths
-            self.trg = sorted_trg
-            self.sep_mask = sorted_sep_mask
+            if self.trg_input is not None:
+                self.trg_input = sorted_trg_input
+                self.trg_mask = sorted_trg_mask
+                self.trg_lengths = sorted_trg_lengths
+                self.trg = sorted_trg
 
             if self.use_cuda:
                 self._make_cuda()
 
             return rev_index
 
-        if self.trg_input is not None:
+        else:
+            _, perm_index = self.trg_lengths.sort(0, descending=True)
+            rev_index = [0]*perm_index.size(0)
+            for new_pos, old_pos in enumerate(perm_index.cpu().numpy()):
+                rev_index[old_pos] = new_pos
+
             sorted_trg_input = self.trg_input[perm_index]
             sorted_trg_lengths = self.trg_lengths[perm_index]
             sorted_trg_mask = self.trg_mask[perm_index]
             sorted_trg = self.trg[perm_index]
+            if self.sep_mask is not None:
+                sorted_sep_mask = self.sep_mask[perm_index]
+                self.sep_mask = sorted_sep_mask
 
-        self.src = sorted_src
-        self.src_lengths = sorted_src_lengths
-        self.src_mask = sorted_src_mask
-
-        if self.trg_input is not None:
             self.trg_input = sorted_trg_input
             self.trg_mask = sorted_trg_mask
             self.trg_lengths = sorted_trg_lengths
             self.trg = sorted_trg
 
-        if self.use_cuda:
-            self._make_cuda()
+            if self.use_cuda:
+                self._make_cuda()
 
-        return rev_index
-
+            return rev_index
 

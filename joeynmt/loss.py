@@ -72,6 +72,7 @@ class XentLoss(nn.Module):
         else:
             # targets: indices with batch*seq_len
             targets = targets.contiguous().view(-1)
+
         loss = self.criterion(
             log_probs.contiguous().view(-1, log_probs.size(-1)), targets)
         return loss
