@@ -9,6 +9,8 @@ from joeynmt.embeddings import Embeddings
 from joeynmt.helpers import tile
 from joeynmt.batch import Batch
 
+from stopwatch import Stopwatch
+
 
 __all__ = ["greedy", "transformer_greedy", "recurrent_greedy", "beam_search"]
 
@@ -132,6 +134,7 @@ def transformer_greedy(
         - stacked_output: output hypotheses (2d array of indices),
         - stacked_attention_scores: attention scores (3d array)
     """
+    #batch_stopwatch = Stopwatch()
     batch_size = batch.trg.size()[0]
     dec_only = encoder_output is None
 
@@ -146,7 +149,9 @@ def transformer_greedy(
     trg_mask = batch.trg.new_ones([1, 1, 1], dtype=torch.bool)
     sep_mask = trg_mask
     finished = trg_mask.new_zeros((batch_size)).byte()
+
     for _ in range(max_output_length):
+        #iter_stopwatch = Stopwatch()
         trg_embed = embed(ys)  # embed the previous tokens
         # pylint: disable=unused-variable
         with torch.no_grad():
@@ -172,7 +177,11 @@ def transformer_greedy(
         if (finished >= 1).sum() == batch_size:
             break
 
+        #print('iter: ', iter_stopwatch)
+
     ys = ys[:, 1:]  # remove BOS-symbol
+    #print('batch: ', batch_stopwatch)
+    #print('################################################################')
     return ys.detach().cpu().numpy(), None
 
 
@@ -321,7 +330,7 @@ def beam_search(
 
     # numbering elements in the batch
     batch_offset = torch.arange(
-        batch_size, dtype=torch.long, device=device) #, device=trg_input.device)
+        batch_size, dtype=torch.long, device=device)
 
     # numbering elements in the extended batch, i.e. beam size copies of each
     # batch element
@@ -336,7 +345,7 @@ def beam_search(
     # in the batch to be further decoded (that are still "alive")
     if dec_only:
         sep_location = (batch.trg_input == sep_index).nonzero()[0,1]
-        alive_seq = torch.cat([batch.trg_input[:, :sep_location + 1]]*size, dim=0).to(device)
+        alive_seq = tile(batch.trg_input[:, :sep_location + 1], count=size, dim=0).to(device)
     else:
         alive_seq = torch.full(
             [batch_size * size, 1],
