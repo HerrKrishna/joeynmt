@@ -1,4 +1,4 @@
-name: "transf_dec_only_iwslt14"
+name: "transf_dec_only_iwslt14_wide"
 
 data:
     src: "de"
@@ -35,7 +35,7 @@ training:
     validation_freq: 48000
     logging_freq: 1000
     eval_metric: "bleu"
-    model_dir: "models/transformer_dec_only_iwslt14"
+    model_dir: "models/transformer_dec_only_iwslt14_wide"
     overwrite: True
     shuffle: True
     use_cuda: True
@@ -53,14 +53,14 @@ model:
     tied_softmax: True
     decoder:
         type: "transformer"
-        num_layers: 18
+        num_layers: 7 
         num_heads: 4
         embeddings:
-            embedding_dim: 256
+            embedding_dim: 400
             scale: True
             dropout: 0.
         # typically ff_size = 4 x hidden_size
-        hidden_size: 256
-        ff_size: 1024
+        hidden_size: 400
+        ff_size: 800
         dropout: 0.3
         use_enc_dec_attention: False
