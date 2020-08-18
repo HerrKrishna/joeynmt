@@ -9,9 +9,6 @@ from joeynmt.embeddings import Embeddings
 from joeynmt.helpers import tile
 from joeynmt.batch import Batch
 
-from stopwatch import Stopwatch
-
-
 __all__ = ["greedy", "transformer_greedy", "recurrent_greedy", "beam_search"]
 
 
