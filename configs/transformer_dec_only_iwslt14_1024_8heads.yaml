@@ -1,4 +1,4 @@
-name: "iwslt14-deen-bpe-transformer"
+name: "transf_dec_only_iwslt14_wide"
 
 data:
     src: "de"
@@ -8,7 +8,8 @@ data:
     test: "test/data/iwslt14/test.bpe.32000"
     level: "bpe"
     lowercase: True
-    max_sent_length: 62
+    max_sent_length: 124
+    type: "TwoInOne"
 
 testing:
     beam_size: 5
@@ -23,7 +24,7 @@ training:
     patience: 5
     decrease_factor: 0.7
     loss: "crossentropy"
-    learning_rate: 0.0003
+    learning_rate: 0.00003
     learning_rate_min: 0.00000001
     weight_decay: 0.0
     label_smoothing: 0.1
@@ -34,7 +35,7 @@ training:
     validation_freq: 24000
     logging_freq: 5000
     eval_metric: "bleu"
-    model_dir: "models/iwslt14_deen_bpe_transformer"
+    model_dir: "models/transformer_dec_only_iwslt14__1024_8heads"
     overwrite: True
     shuffle: True
     use_cuda: True
@@ -50,27 +51,16 @@ model:
     bias_initializer: "zeros"
     tied_embeddings: False
     tied_softmax: True
-    encoder:
-        type: "transformer"
-        num_layers: 6
-        num_heads: 4
-        embeddings:
-            embedding_dim: 512
-            scale: True
-            dropout: 0.
-        # typically ff_size = 4 x hidden_size
-        hidden_size: 512
-        ff_size: 2048
-        dropout: 0.3
     decoder:
         type: "transformer"
-        num_layers: 4
-        num_heads: 4
+        num_layers: 3
+        num_heads: 8
         embeddings:
-            embedding_dim: 512
+            embedding_dim: 1024
             scale: True
             dropout: 0.
         # typically ff_size = 4 x hidden_size
-        hidden_size: 512
+        hidden_size: 1024
         ff_size: 2048
         dropout: 0.3
+        use_enc_dec_attention: False
