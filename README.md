@@ -4,7 +4,7 @@ The term paper can be found in paper.pdf.
 To recreate the work described in the accompanying term paper, please install this version of joeynmt as described here:
 https://joeynmt.readthedocs.io/en/latest/install.html
 
-Please make sure to clone this GitHub repository instead of the original JoeyNMT repository.
+Please make sure to clone this GitHub repository instead of the original JoeyNMT repository and make sure that you are on the DecoderOnlyMT branch
 To obtain the relevant training data, run the script 
 > scripts/getiwslt14_bpe.sh
 
